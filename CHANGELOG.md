@@ -4,6 +4,32 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.2 — 2026-04-19
+
+### Added — Phase 3 core implementation (#1)
+
+- `pkg/config` (78.3% coverage): typed Linux layer with full struct schemas (DiskLayout, UsersGroups, Directories, Mounts, Packages, Sysctl, Limits, Firewall, HostsEntries, Services, SSHConfig, SELinuxConfig), $ref loader + profile extends, secret resolver (env/file/vault/gen/ref + pipes), cross-field validators
+- `pkg/session` (~85% on exercised paths): SSH + localhost session abstraction with retry, key auth, sudo, WriteFile/ReadFile/FileExists
+- `pkg/managers` (69.5% coverage): Manager interface + registry, 5 core managers implemented with idempotent Plan → Apply → Verify → Rollback:
+  - **dir**: directory tree with owner/group/mode (recursive option)
+  - **user**: user + group CRUD, SSH keys, sudo-enabled chpasswd
+  - **package**: distro-aware (dnf/yum/apt/zypper) install/remove
+  - **disk**: LVM (PV/VG/LV) + mkfs + fstab + mount with safety
+  - **mount**: CIFS + NFS + bind + tmpfs with credentials file management
+- `pkg/apply` (78.4% coverage): cross-manager orchestrator with dependency order (disk → user → dir → package → mount), Plan/Apply/Verify/Rollback/Diff
+- CLI handlers wired: `config validate`, `dir/disk/mount/user/package {plan|apply|verify}`, `apply {plan|apply|verify|rollback}`, `diff`
+
+### Verified
+
+- `go build ./...`, `go vet ./...`, `staticcheck ./...`, `go test ./...` all clean
+
+### Known limitations (Phase 3b follow-ups)
+
+- `config render` returns "not implemented"
+- Sample testdata $ref resolution has an edge case (manager unit tests pass on their own fixtures)
+- SSH path tested via mock only; real-host integration deferred to Phase 5
+- Managers 6-13 (service, sysctl, limits, firewall, hosts, network, ssh, selinux) scaffolded but not implemented — Phase 4 scope
+
 ## v2026.04.11.1 — 2026-04-22
 
 Initial scaffold.
