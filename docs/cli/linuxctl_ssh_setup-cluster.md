@@ -27,9 +27,9 @@ linuxctl ssh setup-cluster [env.yaml] [flags]
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```

@@ -1,15 +1,15 @@
-## linuxctl env list
+## linuxctl stack show
 
-List registered envs
+Dump the resolved env.yaml tree
 
 ```
-linuxctl env list [flags]
+linuxctl stack show <name> [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for list
+  -h, --help   help for show
 ```
 
 ### Options inherited from parent commands
@@ -17,15 +17,15 @@ linuxctl env list [flags]
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
-      --host string      Restrict to a single host from the env
+      --host string      Restrict to a single host from the stack
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```
 
 ### SEE ALSO
 
-* [linuxctl env](linuxctl_env.md)	 - Manage the local env registry (~/.linuxctl/envs.yaml)
+* [linuxctl stack](linuxctl_stack.md)	 - Manage the local stack registry (~/.linuxctl/stacks.yaml)
 

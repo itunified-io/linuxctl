@@ -13,10 +13,10 @@ Manage ssh state (authorized_keys, sshd_config, cluster trust)
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
-      --host string      Restrict to a single host from the env
+      --host string      Restrict to a single host from the stack
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```

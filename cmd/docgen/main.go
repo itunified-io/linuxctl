@@ -64,7 +64,7 @@ func main() {
 	sb.WriteString("\n## Conventions\n\n")
 	sb.WriteString("- Every subsystem manager command exposes `plan`, `apply`, `verify` verbs.\n")
 	sb.WriteString("- `linuxctl apply ...` orchestrates the full 13-manager DAG.\n")
-	sb.WriteString("- Persistent flags `--env`, `--host`, `--yes`, `--dry-run`, `--format` apply across the tree.\n")
+	sb.WriteString("- Persistent flags `--stack`, `--host`, `--yes`, `--dry-run`, `--format` apply across the tree. `--env` remains as a deprecated alias for one release (#17).\n")
 
 	if err := os.WriteFile(filepath.Join("docs", "cli-reference.md"), []byte(sb.String()), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "write index:", err)

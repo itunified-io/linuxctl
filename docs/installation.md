@@ -90,7 +90,7 @@ docker run --rm -it \
 
 Volume conventions:
 
-- `/root/.linuxctl` — license JWT, context, env registry, SQLite state.
+- `/root/.linuxctl` — license JWT, context, stack registry (`stacks.yaml`), SQLite state.
 - `/root/.ssh` — operator private keys (read-only mount).
 - `/workspace` — the directory containing your `linux.yaml` / `env.yaml`.
 

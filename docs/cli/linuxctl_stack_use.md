@@ -1,15 +1,15 @@
-## linuxctl env current
+## linuxctl stack use
 
-Print the default env
+Set the default stack
 
 ```
-linuxctl env current [flags]
+linuxctl stack use <name> [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for current
+  -h, --help   help for use
 ```
 
 ### Options inherited from parent commands
@@ -17,15 +17,15 @@ linuxctl env current [flags]
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
-      --host string      Restrict to a single host from the env
+      --host string      Restrict to a single host from the stack
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```
 
 ### SEE ALSO
 
-* [linuxctl env](linuxctl_env.md)	 - Manage the local env registry (~/.linuxctl/envs.yaml)
+* [linuxctl stack](linuxctl_stack.md)	 - Manage the local stack registry (~/.linuxctl/stacks.yaml)
 

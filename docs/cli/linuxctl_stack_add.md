@@ -1,15 +1,15 @@
-## linuxctl env new
+## linuxctl stack add
 
-Create a new local env pointer
+Register an existing stack directory
 
 ```
-linuxctl env new <name> [flags]
+linuxctl stack add <name> [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for new
+  -h, --help   help for add
 ```
 
 ### Options inherited from parent commands
@@ -17,15 +17,15 @@ linuxctl env new <name> [flags]
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
-      --host string      Restrict to a single host from the env
+      --host string      Restrict to a single host from the stack
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```
 
 ### SEE ALSO
 
-* [linuxctl env](linuxctl_env.md)	 - Manage the local env registry (~/.linuxctl/envs.yaml)
+* [linuxctl stack](linuxctl_stack.md)	 - Manage the local stack registry (~/.linuxctl/stacks.yaml)
 
