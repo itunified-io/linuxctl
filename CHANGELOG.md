@@ -4,6 +4,30 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.7 — 2026-04-22
+
+### Added — comprehensive documentation (#13)
+
+- `docs/installation.md` — Homebrew, direct binary, Docker, build-from-source, air-gap, shell completion, license, SSH setup, first-run verification
+- `docs/quick-start.md` — 5-minute walkthrough (validate, plan, apply, verify, orchestrator, diff) against `localhost`
+- `docs/user-guide.md` — concepts, session model (local/SSH), env registry, 13 managers, orchestrator, fleet ops, rollback, presets, recommended operator workflow
+- `docs/manager-reference.md` — per-manager deep dive: owns, YAML fields, idempotency, hazards, rollback, examples for all 13 managers, plus protocol invariants
+- `docs/config-reference.md` — full YAML schema (env.yaml, linux.yaml, context, envs.yaml), secret resolvers, `$ref` composition, validation
+- `docs/preset-guide.md` — preset model, shipped (`oracle-19c`), Business stubs (`pg-16`, `hardened-cis`), tier gating, custom preset roadmap
+- `docs/distro-guide.md` — supported distros (Tier 1 / 2), detection, per-manager distro dispatch, distro-specific gotchas
+- `docs/integration-guide.md` — composition with proxctl, mcp-host, dbx, Ansible, Terraform, GitOps / CI pattern, out-of-scope declarations
+- `docs/licensing.md` — Community/Business/Enterprise tier matrix, JWT format, feature gating, grace / expiry, air-gap activation
+- `docs/troubleshooting.md` — top 20 real-world issues with root cause + fix (SSH auth, drift, LVM partials, package locks, firewall reload, SELinux reboot, etc.)
+- `docs/architecture.md` — component diagram, manager protocol invariants, orchestrator DAG, SQLite state schema, session abstraction, error classification
+- `docs/contributing.md` — dev setup, test approach (unit + integration + race), coverage targets, branch/PR flow, adding a manager/distro, release process, code style
+- `docs/examples/host-only`, `docs/examples/pg-single`, `docs/examples/oracle-rac-2node` — validated `linux.yaml` samples (pass `linuxctl config validate`)
+- `cmd/docgen/main.go` + `make docs-cli` — cobra/doc-based CLI reference generator producing 78 per-command Markdown pages plus an aggregated `docs/cli-reference.md` index
+- `README.md` — elevator pitch, badges, 30-second demo, doc index, tier brief
+
+### Dependencies
+
+- Added `github.com/spf13/cobra/doc`, upgraded `cobra` to v1.10.2, `pflag` to v1.0.9, `go-md2man` to v2.0.6
+
 ## v2026.04.11.6 — 2026-04-19
 
 ### Added — Phase 5: cluster SSH wiring (#11)
