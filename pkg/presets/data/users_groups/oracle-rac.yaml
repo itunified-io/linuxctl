@@ -1,0 +1,20 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-rac
+  category: users_groups
+  tier: community
+  source: "Oracle Database 19c/21c/23ai RAC Install Guide — pre-install user/group matrix"
+  version: "2026-04-22"
+spec:
+  users_groups:
+    groups:
+      - { name: "oinstall", gid: 54321 }
+      - { name: "dba",      gid: 54322 }
+      - { name: "asmadmin", gid: 54331 }
+      - { name: "asmdba",   gid: 54332 }
+      - { name: "asmoper",  gid: 54333 }
+      - { name: "racdba",   gid: 54334 }
+    users:
+      - { name: "oracle", uid: 54321, gid: "oinstall", groups: ["dba", "asmdba"] }
+      - { name: "grid",   uid: 54322, gid: "oinstall", groups: ["dba", "asmadmin", "asmdba", "asmoper", "racdba"] }

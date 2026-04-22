@@ -1,0 +1,14 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: pg-user
+  category: users_groups
+  tier: community
+  source: "PostgreSQL PGDG packaging — postgres system user/group"
+  version: "2026-04-22"
+spec:
+  users_groups:
+    groups:
+      - { name: "postgres", gid: 26 }
+    users:
+      - { name: "postgres", uid: 26, gid: "postgres", home: "/var/lib/pgsql", shell: "/bin/bash" }

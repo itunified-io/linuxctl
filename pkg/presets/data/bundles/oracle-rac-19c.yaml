@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: oracle-rac-19c
+  category: bundles
+  tier: community
+  source: "Oracle Database 19c RAC baseline (OFA + RAC users + preinstall + sysctl/limits)"
+  version: "2026-04-22"
+spec:
+  bundle:
+    directories_preset: oracle-ofa-19c
+    users_groups_preset: oracle-rac
+    packages_preset: oracle-19c
+    sysctl_preset: oracle-19c
+    limits_preset: oracle-19c

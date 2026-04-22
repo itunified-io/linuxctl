@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-single
+  category: users_groups
+  tier: community
+  source: "Oracle Database single-instance install: simplified user/group set (no ASM/RAC groups)"
+  version: "2026-04-22"
+spec:
+  users_groups:
+    groups:
+      - { name: "oinstall", gid: 54321 }
+      - { name: "dba",      gid: 54322 }
+    users:
+      - { name: "oracle", uid: 54321, gid: "oinstall", groups: ["dba"] }

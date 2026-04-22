@@ -1,0 +1,16 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-23ai
+  category: packages
+  tier: community
+  source: "Oracle Linux oracle-database-preinstall-23ai metapackage"
+  version: "2026-04-22"
+spec:
+  packages:
+    install:
+      # TODO: oracle-database-preinstall-23ai is the target — confirm final
+      # metapackage name after Oracle 23ai GA for non-Oracle-Linux distros.
+      - oracle-database-preinstall-23ai
+      - kmod-oracleasm
+      - cifs-utils

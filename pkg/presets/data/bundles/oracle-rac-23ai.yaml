@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: oracle-rac-23ai
+  category: bundles
+  tier: community
+  source: "Oracle Database 23ai RAC baseline (sysctl/limits reuse 19c values until Oracle publishes 23ai-specific guidance)"
+  version: "2026-04-22"
+spec:
+  bundle:
+    directories_preset: oracle-ofa-23ai
+    users_groups_preset: oracle-rac
+    packages_preset: oracle-23ai
+    sysctl_preset: oracle-19c
+    limits_preset: oracle-19c

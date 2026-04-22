@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: pg-16
+  category: sysctl
+  tier: community
+  source: "PostgreSQL 16 tuned conventions (kernel shmem + huge-page friendly)"
+  version: "2026-04-22"
+spec:
+  sysctl:
+    - { key: "kernel.shmmax",    value: "68719476736" }
+    - { key: "kernel.shmall",    value: "4294967296" }
+    - { key: "vm.swappiness",    value: "10" }
+    - { key: "vm.overcommit_memory", value: "2" }
+    - { key: "vm.overcommit_ratio",  value: "80" }

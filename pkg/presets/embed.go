@@ -17,11 +17,19 @@ import (
 var embeddedFS embed.FS
 
 // index is the parsed in-memory catalog. Populated lazily by load().
+//
+// Presets are keyed by "category/name" because the same short name (e.g.
+// "oracle-19c") is legitimately reused across categories (packages + sysctl +
+// limits). Bundles reference child presets by name + category from the
+// bundle spec, so the registry resolves them unambiguously.
 type index struct {
-	byName   map[string]*Preset
-	bundles  map[string]*Bundle
-	meta     []PresetMeta
+	byKey   map[string]*Preset // "category/name" → preset
+	byName  map[string][]*Preset // "name" → all presets with that name (across categories)
+	bundles map[string]*Bundle
+	meta    []PresetMeta
 }
+
+func catKey(category, name string) string { return category + "/" + name }
 
 var (
 	loadOnce sync.Once
@@ -33,7 +41,8 @@ var (
 func load() (*index, error) {
 	loadOnce.Do(func() {
 		idx := &index{
-			byName:  map[string]*Preset{},
+			byKey:   map[string]*Preset{},
+			byName:  map[string][]*Preset{},
 			bundles: map[string]*Bundle{},
 		}
 		err := fs.WalkDir(embeddedFS, "data", func(p string, d fs.DirEntry, werr error) error {
@@ -70,10 +79,12 @@ func load() (*index, error) {
 			if fn != pr.Metadata.Name {
 				return fmt.Errorf("%s: filename %q != metadata.name %q", p, fn, pr.Metadata.Name)
 			}
-			if _, exists := idx.byName[pr.Metadata.Name]; exists {
-				return fmt.Errorf("duplicate preset name %q (file %s)", pr.Metadata.Name, p)
+			key := catKey(pr.Metadata.Category, pr.Metadata.Name)
+			if _, exists := idx.byKey[key]; exists {
+				return fmt.Errorf("duplicate preset %q (file %s)", key, p)
 			}
-			idx.byName[pr.Metadata.Name] = &pr
+			idx.byKey[key] = &pr
+			idx.byName[pr.Metadata.Name] = append(idx.byName[pr.Metadata.Name], &pr)
 			idx.meta = append(idx.meta, pr.Metadata)
 			if pr.Kind == "Bundle" {
 				bundle, berr := decodeBundle(&pr)

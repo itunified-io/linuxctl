@@ -35,8 +35,9 @@ func resolveTier(fn TierFunc) Tier {
 	return t
 }
 
-// Resolve loads a preset by name. Returns an error if unknown or if the
-// caller's tier is below the preset's required tier.
+// Resolve loads a preset by name. Returns an error if unknown, ambiguous
+// (same name in multiple categories), or if the caller's tier is below the
+// preset's required tier. For ambiguous names, use ResolveCategory.
 func Resolve(name string, tierFn TierFunc) (*Preset, error) {
 	if name == "" {
 		return nil, fmt.Errorf("preset: empty name")
@@ -45,13 +46,42 @@ func Resolve(name string, tierFn TierFunc) (*Preset, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, ok := idx.byName[name]
-	if !ok {
+	matches, ok := idx.byName[name]
+	if !ok || len(matches) == 0 {
 		return nil, fmt.Errorf("preset %q not found", name)
 	}
+	if len(matches) > 1 {
+		cats := make([]string, 0, len(matches))
+		for _, m := range matches {
+			cats = append(cats, string(m.Metadata.Category))
+		}
+		return nil, fmt.Errorf("preset %q is ambiguous across categories %v; use ResolveCategory", name, cats)
+	}
+	p := matches[0]
 	caller := resolveTier(tierFn)
 	if tierRank(p.Metadata.Tier) > tierRank(caller) {
 		return nil, fmt.Errorf("preset %q requires tier %q (active tier: %q)", name, p.Metadata.Tier, caller)
+	}
+	return p, nil
+}
+
+// ResolveCategory loads a preset by (category, name). This is the form the
+// managers use, since each manager owns a single category.
+func ResolveCategory(category, name string, tierFn TierFunc) (*Preset, error) {
+	if name == "" {
+		return nil, fmt.Errorf("preset: empty name")
+	}
+	idx, err := load()
+	if err != nil {
+		return nil, err
+	}
+	p, ok := idx.byKey[catKey(category, name)]
+	if !ok {
+		return nil, fmt.Errorf("preset %s/%s not found", category, name)
+	}
+	caller := resolveTier(tierFn)
+	if tierRank(p.Metadata.Tier) > tierRank(caller) {
+		return nil, fmt.Errorf("preset %s/%s requires tier %q (active tier: %q)", category, name, p.Metadata.Tier, caller)
 	}
 	return p, nil
 }
@@ -80,10 +110,10 @@ func List(tierFn TierFunc) []PresetMeta {
 }
 
 // BundleExpand resolves a bundle name and returns a map of category → child
-// preset name. The caller can then call Resolve(childName, ...) for each
-// category.
+// preset name. The caller can then call ResolveCategory(category, childName,
+// ...) for each category.
 func BundleExpand(name string, tierFn TierFunc) (map[string]string, error) {
-	p, err := Resolve(name, tierFn)
+	p, err := ResolveCategory("bundles", name, tierFn)
 	if err != nil {
 		return nil, err
 	}

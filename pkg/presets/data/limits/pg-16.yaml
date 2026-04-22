@@ -1,0 +1,16 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: pg-16
+  category: limits
+  tier: community
+  source: "PostgreSQL 16 recommended ulimits for the postgres user"
+  version: "2026-04-22"
+spec:
+  limits:
+    - { user: "postgres", type: "soft", item: "nofile",  value: "8192" }
+    - { user: "postgres", type: "hard", item: "nofile",  value: "65536" }
+    - { user: "postgres", type: "soft", item: "nproc",   value: "8192" }
+    - { user: "postgres", type: "hard", item: "nproc",   value: "16384" }
+    - { user: "postgres", type: "soft", item: "memlock", value: "unlimited" }
+    - { user: "postgres", type: "hard", item: "memlock", value: "unlimited" }
