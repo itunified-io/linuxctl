@@ -123,3 +123,35 @@ func TestShellQuoteOne(t *testing.T) {
 	require.Equal(t, "'foo'", shellQuoteOne("foo"))
 	require.Equal(t, `'o'"'"'brien'`, shellQuoteOne("o'brien"))
 }
+
+// TestAllManagers_Verify_PropagatesPlanError ensures every manager's Verify
+// surfaces the error produced by Plan (e.g. unsupported spec type), not just
+// succeeds with empty drift.
+func TestAllManagers_Verify_PropagatesPlanError(t *testing.T) {
+	// Bogus spec values — most managers return "unsupported" from their cast.
+	cases := []struct {
+		name string
+		mgr  Manager
+		spec Spec
+	}{
+		{"firewall", NewFirewallManager().WithSession(newFWMock()), 42},
+		{"hosts", NewHostsManager().WithSession(newHostsMock("")), 42},
+		{"dir", NewDirManager().WithSession(newDirMockSession()), 42},
+		{"network", NewNetworkManager().WithSession(newNetMock()), 42},
+		{"service", NewServiceManager().WithSession(newSvcMock()), 42},
+		{"ssh", NewSSHAuthManager().WithSession(newMockSession()), "bogus"},
+		{"selinux", NewSELinuxManager().WithSession(newMockSession()), "bogus"},
+		{"user", NewUserManager().WithSession(newMockSession()), "bogus"},
+		{"sysctl", NewSysctlManager().WithSession(newFileMock()), "bogus"},
+		{"limits", NewLimitsManager().WithSession(newFileMock()), "bogus"},
+		{"package", NewPackageManager().WithSession(newMockSession()), "bogus"},
+		{"disk", NewDiskManager().WithSession(newFullMock()), "bogus"},
+		{"mount", NewMountManager().WithSession(newFullMock()), "bogus"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.mgr.Verify(context.Background(), tc.spec)
+			require.Error(t, err, "%s.Verify should propagate Plan error", tc.name)
+		})
+	}
+}

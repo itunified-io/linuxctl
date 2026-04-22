@@ -399,6 +399,89 @@ func TestDiskManager_Rollback_CmdFails(t *testing.T) {
 	}
 }
 
+func TestDiskManager_CoerceLayout_ValueForm(t *testing.T) {
+	dl := config.DiskLayout{}
+	got, err := coerceLayout(dl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("expected non-nil")
+	}
+	got2, _ := coerceLayout((*config.DiskLayout)(nil))
+	_ = got2 // pointer nil path
+}
+
+func TestDiskManager_Plan_InvalidSpec(t *testing.T) {
+	d := NewDiskManager()
+	_, err := d.Plan(context.Background(), "bogus", nil)
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestDiskManager_Verify_PlanErr(t *testing.T) {
+	d := NewDiskManager()
+	_, err := d.Verify(context.Background(), "bogus")
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestDiskManager_PlanLayout_NilLayout(t *testing.T) {
+	d := NewDiskManager().WithSession(newFullMock())
+	changes, err := d.PlanLayout(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != nil {
+		t.Error("nil layout → nil changes")
+	}
+}
+
+func TestDiskManager_PlanLayout_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	layout := &config.DiskLayout{
+		Root: &config.RootDisk{Device: "/dev/sda", VGName: "rootvg",
+			LogicalVolumes: []config.LogicalVolume{{Name: "root", Size: "20G", FS: "xfs", MountPoint: "/"}}},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Error("expected changes for no-session (empty discovery)")
+	}
+}
+
+func TestDiskManager_PlanLayout_MissingAdditionalDevice(t *testing.T) {
+	ms := newFullMock().
+		on("pvs", `{"report":[{"pv":[]}]}`, nil).
+		on("vgs", `{"report":[{"vg":[]}]}`, nil).
+		on("lvs", `{"report":[{"lv":[]}]}`, nil).
+		on("findmnt", `{"filesystems":[]}`, nil)
+	// /dev/sdb missing
+	d := NewDiskManager().WithSession(ms)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{{
+			Device: "/dev/sdb", VGName: "vg1",
+			LogicalVolumes: []config.LogicalVolume{{Name: "lv1", Size: "1G", FS: "ext4", MountPoint: "/mnt/lv1"}},
+		}},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect one "error" noop change indicating device absence.
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	after := changes[0].After.(map[string]any)
+	if after["op"] != "error" {
+		t.Errorf("expected error op; got %v", after)
+	}
+}
+
 func TestDiskManager_Rollback_SkipsEmptyCmd(t *testing.T) {
 	ms := newFullMock()
 	d := NewDiskManager().WithSession(ms)

@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -282,6 +283,59 @@ func TestDir_ApplyAttrs_ChownNoRecurse(t *testing.T) {
 	joined := strings.Join(mock.sudoRuns, " | ")
 	require.Contains(t, joined, "chown 'u'")
 	require.NotContains(t, joined, "chmod")
+}
+
+func TestDirDrift_AllCombinations(t *testing.T) {
+	cur := currentDir{Exists: true, Owner: "u", Group: "g", Mode: "0755"}
+	cases := []struct {
+		name  string
+		d     config.Directory
+		drift bool
+	}{
+		{"no drift", config.Directory{Owner: "u", Group: "g", Mode: "0755"}, false},
+		{"owner drift", config.Directory{Owner: "other"}, true},
+		{"group drift", config.Directory{Group: "other"}, true},
+		{"mode drift", config.Directory{Mode: "0700"}, true},
+		{"empty spec no drift", config.Directory{}, false},
+	}
+	for _, tc := range cases {
+		if got := dirDrift(tc.d, cur); got != tc.drift {
+			t.Errorf("%s: want %v, got %v", tc.name, tc.drift, got)
+		}
+	}
+}
+
+func TestDir_Stat_SudoFallback(t *testing.T) {
+	mock := newDirMockSession()
+	mock.exists["/root/secret"] = true
+	firstCall := 0
+	mock.handler = func(cmd string, sudo bool) (string, string, error) {
+		if strings.HasPrefix(cmd, "stat -c") {
+			if !sudo {
+				firstCall++
+				return "", "Permission denied", errors.New("denied")
+			}
+			return "root root 700\n", "", nil
+		}
+		return "", "", nil
+	}
+	dm := NewDirManager().WithSession(mock)
+	d, err := dm.stat(context.Background(), "/root/secret")
+	require.NoError(t, err)
+	require.True(t, d.Exists)
+	require.Equal(t, "0700", d.Mode)
+	require.Equal(t, 1, firstCall, "non-sudo should have been tried once")
+}
+
+func TestDir_Stat_MalformedOutput(t *testing.T) {
+	mock := newDirMockSession()
+	mock.exists["/x"] = true
+	mock.handler = func(cmd string, _ bool) (string, string, error) {
+		return "garbage\n", "", nil
+	}
+	dm := NewDirManager().WithSession(mock)
+	_, err := dm.stat(context.Background(), "/x")
+	require.Error(t, err)
 }
 
 func TestDir_ApplyAttrs_GroupOnly(t *testing.T) {

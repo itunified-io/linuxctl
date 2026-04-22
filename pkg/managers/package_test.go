@@ -396,6 +396,68 @@ func TestPackageManager_Apply_EmptyChanges(t *testing.T) {
 	}
 }
 
+func TestPackageManager_RunPackageOp_Zypper(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyZYPPER
+	p.tool = "zypper"
+	if err := p.runPackageOp(context.Background(), "install", []string{"nginx"}); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("zypper --non-interactive install") {
+		t.Errorf("expected zypper install; got %v", ms.cmds)
+	}
+	ms2 := newMockSession()
+	p2 := NewPackageManager().WithSession(ms2)
+	p2.family = familyZYPPER
+	p2.tool = "zypper"
+	if err := p2.runPackageOp(context.Background(), "remove", []string{"nginx"}); err != nil {
+		t.Fatal(err)
+	}
+	if !ms2.ranContaining("remove --no-confirm") {
+		t.Errorf("expected zypper remove; got %v", ms2.cmds)
+	}
+}
+
+func TestPackageManager_RunPackageOp_UnknownFamily(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = "weird"
+	err := p.runPackageOp(context.Background(), "install", []string{"x"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestPackageManager_RunPackageOp_EmptyNames(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyRPM
+	p.tool = "dnf"
+	if err := p.runPackageOp(context.Background(), "install", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Error("should not run cmd")
+	}
+}
+
+func TestPackageManager_RunPackageOp_FatalNonLockError(t *testing.T) {
+	ms := newMockSession().on("dnf install", "", fmt.Errorf("kaboom"))
+	ms.responses["dnf install"] = mockResponse{stderr: "permission denied", err: fmt.Errorf("kaboom")}
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyRPM
+	p.tool = "dnf"
+	err := p.runPackageOp(context.Background(), "install", []string{"x"})
+	if err == nil {
+		t.Error("expected err")
+	}
+	// Should have only attempted once (not a lock error).
+	if len(ms.cmds) != 1 {
+		t.Errorf("expected 1 attempt, got %d", len(ms.cmds))
+	}
+}
+
 func TestIsLockError(t *testing.T) {
 	cases := map[string]bool{
 		"":                                                  false,

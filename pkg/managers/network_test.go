@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -281,4 +282,31 @@ func TestNetwork_CurrentHostnameErrorFallsBack(t *testing.T) {
 	changes, err := nm.Plan(context.Background(), ns, nil)
 	require.NoError(t, err)
 	require.Empty(t, changes)
+}
+
+// errMockSession forces `hostname` to return an error so currentHostname
+// falls through to hostnamectl.
+type errHostnameSession struct {
+	*netMockSession
+	hostnameCalls int
+}
+
+func (e *errHostnameSession) Run(ctx context.Context, cmd string) (string, string, error) {
+	if strings.Contains(cmd, "hostname") && !strings.Contains(cmd, "hostnamectl") {
+		e.hostnameCalls++
+		return "", "cmd not found", errors.New("no hostname")
+	}
+	if strings.Contains(cmd, "hostnamectl --static") {
+		return "fallback-host\n", "", nil
+	}
+	return e.netMockSession.Run(ctx, cmd)
+}
+
+func TestNetwork_CurrentHostname_FallbackToHostnamectl(t *testing.T) {
+	mock := &errHostnameSession{netMockSession: newNetMock()}
+	nm := NewNetworkManager().WithSession(mock)
+	ns := &NetworkSpec{Hostname: "fallback-host"}
+	changes, err := nm.Plan(context.Background(), ns, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes, "hostnamectl fallback returned the same name")
 }

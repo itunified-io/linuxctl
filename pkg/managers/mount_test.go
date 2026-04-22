@@ -340,6 +340,59 @@ func TestMountManager_Rollback_NoSession(t *testing.T) {
 	}
 }
 
+func TestMountManager_PlanBind_Persistent(t *testing.T) {
+	ms := newFullMock().on("findmnt", `{"filesystems":[]}`, nil)
+	m := NewMountManager().WithSession(ms)
+	mounts := []config.Mount{{Type: "bind", Source: "/src", MountPoint: "/dst", Persistent: true}}
+	changes, err := m.PlanMounts(context.Background(), mounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := collectOps(changes)
+	if !containsStr(ops, "bind_mount") || !containsStr(ops, "fstab") {
+		t.Errorf("expected bind+fstab; got %v", ops)
+	}
+}
+
+func TestMountManager_PlanBind_FstabAlreadyPresent(t *testing.T) {
+	ms := newFullMock().on("findmnt", `{"filesystems":[]}`, nil)
+	ms.files["/etc/fstab"] = []byte("/src /dst none bind 0 0\n")
+	m := NewMountManager().WithSession(ms)
+	mounts := []config.Mount{{Type: "bind", Source: "/src", MountPoint: "/dst", Persistent: true}}
+	changes, err := m.PlanMounts(context.Background(), mounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := collectOps(changes)
+	if containsStr(ops, "fstab") {
+		t.Errorf("fstab should not be planned; ops=%v", ops)
+	}
+}
+
+func TestMountManager_Verify_PlanError(t *testing.T) {
+	m := NewMountManager().WithSession(newFullMock())
+	vr, err := m.Verify(context.Background(), "bogus")
+	if err == nil {
+		t.Errorf("expected err; got vr=%+v", vr)
+	}
+}
+
+func TestMountManager_coerceMounts_PointerForms(t *testing.T) {
+	mounts := []config.Mount{{Type: "bind", Source: "/a", MountPoint: "/b"}}
+	got, err := coerceMounts(&mounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("want 1, got %d", len(got))
+	}
+	var np *[]config.Mount
+	got2, err := coerceMounts(np)
+	if err != nil || got2 != nil {
+		t.Errorf("nil pointer: want nil,nil; got (%v,%v)", got2, err)
+	}
+}
+
 // -------- helpers --------
 
 func collectOps(changes []Change) []string {

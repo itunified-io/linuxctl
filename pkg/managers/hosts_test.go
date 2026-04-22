@@ -321,3 +321,29 @@ func TestHosts_RollbackWriteError(t *testing.T) {
 	err := hm.Rollback(context.Background(), []Change{{Action: "update", Before: "x\n"}})
 	require.Error(t, err)
 }
+
+func TestHosts_CastValueLinux(t *testing.T) {
+	got, err := castHostEntries(config.Linux{HostsEntries: []config.HostEntry{{IP: "1.2.3.4", Names: []string{"x"}}}})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestHosts_CastNilLinuxPointer(t *testing.T) {
+	var l *config.Linux
+	got, err := castHostEntries(l)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestHosts_CastSliceDirect(t *testing.T) {
+	got, err := castHostEntries([]config.HostEntry{{IP: "1.2.3.4", Names: []string{"x"}}})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestHosts_Verify_PlanError(t *testing.T) {
+	mock := newHostsMock("")
+	hm := NewHostsManager().WithSession(mock)
+	_, err := hm.Verify(context.Background(), 42)
+	require.Error(t, err)
+}
