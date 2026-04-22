@@ -104,7 +104,7 @@ func (s *SSHSession) Dial(o Opts) error {
 		HostKeyCallback: hostKeyCb,
 		Timeout:         o.Timeout,
 	}
-	addr := net(o.Host, o.Port)
+	addr := joinHostPort(o.Host, o.Port)
 
 	// Up to 3 attempts with exponential backoff.
 	var lastErr error
@@ -124,7 +124,7 @@ func (s *SSHSession) Dial(o Opts) error {
 	return fmt.Errorf("ssh dial %s: %w", addr, lastErr)
 }
 
-func net(host string, port int) string {
+func joinHostPort(host string, port int) string {
 	if strings.Contains(host, ":") {
 		return host
 	}
