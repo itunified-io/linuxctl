@@ -1,0 +1,25 @@
+kind: Linux
+apiVersion: linuxctl.itunified.io/v1alpha1
+
+# Minimal host baseline example — safe to run on a throwaway host or localhost.
+# The only mutation is a single directory under /tmp.
+
+directories:
+  - path: /tmp/linuxctl-first-run
+    owner: root
+    group: root
+    mode: "0755"
+
+hosts_entries:
+  - ip: 127.0.1.1
+    names:
+      - linuxctl.local
+
+sysctl:
+  - key: kernel.hostname
+    value: linuxctl.local
+
+services:
+  - name: cron
+    enabled: true
+    state: running

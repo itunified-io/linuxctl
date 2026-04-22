@@ -1,72 +1,92 @@
 # linuxctl
 
-`linuxctl` is a declarative, idempotent, auditable CLI that converges a Linux host
-to the desired state described in a `linux.yaml` file. It is the mutation
-counterpart to the read-only `mcp-host` monitoring server and ships as a single
-static Go binary (AGPL-3.0, Ed25519-signed per-tool license).
+**Declarative, idempotent, auditable Linux host configuration — as a single
+static Go binary.**
 
-> Status: **Phase 0 scaffold** — the Cobra tree, 13 manager stubs, and the
-> SQLite / license / session packages compile and are under active implementation.
-> Plan / Apply / Verify / Rollback logic lands in Phase 3.
+[![Go Report Card](https://goreportcard.com/badge/github.com/itunified-io/linuxctl)](https://goreportcard.com/report/github.com/itunified-io/linuxctl)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![CalVer](https://img.shields.io/badge/calver-YYYY.MM.DD.TS-orange.svg)](CHANGELOG.md)
+[![Coverage](https://img.shields.io/badge/coverage-%3E%3D95%25-brightgreen.svg)](docs/contributing.md#2-test-approach)
 
-## Features (target)
+`linuxctl` converges a Linux host to the desired state described in a
+`linux.yaml`. It is the mutation counterpart to the read-only
+[`mcp-host`](https://github.com/itunified-io/mcp-host) monitoring server,
+and is designed to compose with
+[`proxctl`](https://github.com/itunified-io/proxctl),
+[`dbx`](https://github.com/itunified-io/dbx), Ansible, and Terraform.
 
-- 13 subsystem managers: `disk`, `user`, `package`, `service`, `mount`,
-  `sysctl`, `limits`, `firewall`, `hosts`, `network`, `ssh`, `selinux`, `dir`.
-- Orchestrated `apply plan / apply / verify / rollback` across the full DAG.
-- Distro-aware dispatch (RHEL 8/9, Oracle Linux, Rocky, Alma, Ubuntu 22.04/24.04, SLES 15 SP5+).
-- SSH-only, no agent. Works against Proxmox VMs, bare metal, Hostinger VPS,
-  cloud instances — anything with `sshd`.
-- License-gated: Community (single host), Business (fleet + presets),
-  Enterprise (state sync, RBAC, policy lifecycle, air-gap).
-- Audit trail powered by `github.com/itunified-io/dbx/pkg/core/audit`.
-
-## Install
+## 30-second demo
 
 ```bash
-# Homebrew (once published)
 brew install itunified-io/tap/linuxctl
 
-# From source
-go install github.com/itunified-io/linuxctl/cmd/linuxctl@latest
+cat <<EOF > linux.yaml
+kind: Linux
+directories:
+  - path: /tmp/linuxctl-demo
+    owner: root
+    group: root
+    mode: "0755"
+services:
+  - name: cron
+    enabled: true
+    state: running
+EOF
+
+linuxctl config validate linux.yaml
+linuxctl apply plan  linux.yaml --host localhost
+linuxctl apply apply linux.yaml --host localhost --yes
+linuxctl apply verify linux.yaml --host localhost   # zero drift
 ```
 
-## Quickstart
+## Features
 
-```bash
-# 1. Register an env pointing at a master config directory
-linuxctl env add lab --path ~/repos/infrastructure/envs/lab
+- **13 subsystem managers** — `disk`, `user`, `package`, `service`, `mount`,
+  `sysctl`, `limits`, `firewall`, `hosts`, `network`, `ssh`, `selinux`, `dir`.
+- **Plan / Apply / Verify / Rollback** on every manager and on the full DAG.
+- **Distro-aware** — RHEL 8/9, Oracle Linux, Rocky, Alma, Ubuntu 22.04/24.04,
+  Debian 12, SLES 15 SP5+.
+- **Agentless** — only needs `sshd` on the target. No daemon, no runtime.
+- **Auditable** — every change persists to a local SQLite state DB.
+- **License-gated tiers** — Community is free forever; Business adds fleet
+  ops, advanced presets, persistent rollback; Enterprise adds RBAC, audit
+  export, SSO, policy lifecycle.
 
-# 2. Validate the linux.yaml
-linuxctl config validate envs/lab/linux.yaml
+## Status
 
-# 3. Preview changes
-linuxctl apply plan --env lab --host db01
-
-# 4. Apply
-linuxctl apply apply --env lab --host db01 --yes
-
-# 5. Verify
-linuxctl apply verify --env lab --host db01
-```
+Phase 6 stable — all 13 managers pass live idempotency tests on Tier-1
+distros. Coverage >= 95% across every package. See
+[CHANGELOG.md](CHANGELOG.md) for the release timeline.
 
 ## Documentation
 
-- [docs/installation.md](docs/installation.md)
-- [docs/quick-start.md](docs/quick-start.md)
-- [docs/user-guide.md](docs/user-guide.md)
-- [docs/config-reference.md](docs/config-reference.md)
-- [docs/cli-reference.md](docs/cli-reference.md)
-- [docs/manager-reference.md](docs/manager-reference.md)
-- [docs/preset-guide.md](docs/preset-guide.md)
-- [docs/distro-guide.md](docs/distro-guide.md)
-- [docs/integration-guide.md](docs/integration-guide.md)
-- [docs/licensing.md](docs/licensing.md)
-- [docs/troubleshooting.md](docs/troubleshooting.md)
-- [docs/architecture.md](docs/architecture.md)
-- [docs/contributing.md](docs/contributing.md)
+| Doc                                              | What |
+|--------------------------------------------------|------|
+| [installation.md](docs/installation.md)          | Install on every platform, license setup, shell completion |
+| [quick-start.md](docs/quick-start.md)            | 5-minute walkthrough |
+| [user-guide.md](docs/user-guide.md)              | Concepts, sessions, env registry, orchestrator, fleet ops |
+| [manager-reference.md](docs/manager-reference.md)| Per-manager deep dive |
+| [config-reference.md](docs/config-reference.md)  | Full YAML schema |
+| [cli-reference.md](docs/cli-reference.md)        | Auto-generated CLI pages |
+| [preset-guide.md](docs/preset-guide.md)          | Sysctl + limits presets |
+| [distro-guide.md](docs/distro-guide.md)          | Supported distros + per-distro behavior |
+| [integration-guide.md](docs/integration-guide.md)| proxctl / mcp-host / dbx / Ansible / Terraform composition |
+| [licensing.md](docs/licensing.md)                | Tier matrix, JWT format, air-gap activation |
+| [troubleshooting.md](docs/troubleshooting.md)    | Top 20 real-world issues |
+| [architecture.md](docs/architecture.md)          | Components, protocol, DAG, state, session |
+| [contributing.md](docs/contributing.md)          | Dev setup, tests, release process |
+
+## Tier brief
+
+| Tier       | Price             | What you get                                     |
+|------------|-------------------|--------------------------------------------------|
+| Community  | Free forever      | Single-host apply/verify/rollback, `oracle-19c` preset |
+| Business   | Per seat          | Fleet ops, advanced presets, persistent rollback, cluster-SSH bootstrap |
+| Enterprise | Annual contract   | RBAC, audit export, SSO, policy lifecycle, air-gap activation |
+
+See [licensing.md](docs/licensing.md) for the full matrix.
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE). Commercial / Enterprise licenses available
-from itunified.io.
+AGPL-3.0 — see [LICENSE](LICENSE). Commercial / Enterprise licenses are
+available from [itunified.io](https://itunified.io/linuxctl).
