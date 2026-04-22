@@ -1,0 +1,20 @@
+# Build artefacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+coverage.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Local state
+~/.linuxctl/
+*.db

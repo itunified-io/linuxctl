@@ -1,0 +1,74 @@
+# Adapted from dbx — keep in sync when the upstream pattern changes.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: linuxctl
+    main: ./cmd/linuxctl
+    binary: linuxctl
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.ShortCommit}}
+      - -X main.Date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+brews:
+  - name: linuxctl
+    repository:
+      owner: itunified-io
+      name: homebrew-tap
+    homepage: https://github.com/itunified-io/linuxctl
+    description: Declarative Linux host configuration — plan, apply, verify, rollback.
+    license: AGPL-3.0
+
+dockers:
+  - image_templates:
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-amd64
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/amd64
+  - image_templates:
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-arm64
+    use: buildx
+    goarch: arm64
+    build_flag_templates:
+      - --platform=linux/arm64
+
+docker_manifests:
+  - name_template: ghcr.io/itunified-io/linuxctl:{{ .Version }}
+    image_templates:
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-amd64
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-arm64
+  - name_template: ghcr.io/itunified-io/linuxctl:latest
+    image_templates:
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-amd64
+      - ghcr.io/itunified-io/linuxctl:{{ .Version }}-arm64
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
