@@ -120,11 +120,50 @@ func desiredFor(linux *config.Linux, name string) managers.Spec {
 	case "mount":
 		return linux.Mounts
 	case "user":
-		return linux.UsersGroups
+		return usersGroupsSpec(linux.UsersGroups)
 	case "dir":
 		return linux.Directories
 	case "package":
-		return linux.Packages
+		return packagesSpec(linux.Packages)
 	}
 	return linux
+}
+
+// usersGroupsSpec converts the typed config.UsersGroups (nominal type) into
+// the shape the managers package expects. Both structs are structurally
+// identical but distinct nominal types; managers.castUsersGroups previously
+// rejected config.*UsersGroups with "unsupported desired-state type".
+// Fixes linuxctl#8.
+func usersGroupsSpec(ug *config.UsersGroups) managers.UsersGroupsSpec {
+	if ug == nil {
+		return managers.UsersGroupsSpec{}
+	}
+	spec := managers.UsersGroupsSpec{}
+	for _, g := range ug.Groups {
+		spec.Groups = append(spec.Groups, managers.GroupSpec{Name: g.Name, GID: g.GID})
+	}
+	for _, u := range ug.Users {
+		spec.Users = append(spec.Users, managers.UserSpec{
+			Name:     u.Name,
+			UID:      u.UID,
+			GID:      u.GID,
+			Groups:   u.Groups,
+			Home:     u.Home,
+			Shell:    u.Shell,
+			SSHKeys:  u.SSHKeys,
+			Password: u.Password,
+		})
+	}
+	return spec
+}
+
+// packagesSpec converts config.Packages → managers.PackagesSpec. Fixes linuxctl#8.
+func packagesSpec(p *config.Packages) managers.PackagesSpec {
+	if p == nil {
+		return managers.PackagesSpec{}
+	}
+	return managers.PackagesSpec{
+		Install: p.Install,
+		Remove:  p.Remove,
+	}
 }
