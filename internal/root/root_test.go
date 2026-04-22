@@ -259,16 +259,16 @@ func TestManager_PlanVerify_DiskMount(t *testing.T) {
 	}
 }
 
-// TestManager_Package_User_UnsupportedTypeBug documents the pre-existing bug:
-// runManager wires the raw *config.UsersGroups / *config.Packages into the
-// manager's Spec, which doesn't match its cast helpers. Until a prod fix, we
-// assert the error surface so the path is covered.
-func TestManager_Package_User_UnsupportedTypeBug(t *testing.T) {
+// TestManager_Package_User_TypeConversionFix verifies the fix for linuxctl#8:
+// runManager now converts *config.UsersGroups → managers.UsersGroupsSpec and
+// *config.Packages → managers.PackagesSpec via bridge helpers in runtime.go,
+// so the cast helpers no longer return "unsupported desired-state type".
+func TestManager_Package_User_TypeConversionFix(t *testing.T) {
 	linux := writeMinimalLinux(t)
 	for _, name := range []string{"user", "package"} {
 		_, err := executeCmd(t, name, "plan", linux)
-		if err == nil || !strings.Contains(err.Error(), "unsupported desired-state type") {
-			t.Errorf("%s plan: expected type-mismatch bug, got %v", name, err)
+		if err != nil && strings.Contains(err.Error(), "unsupported desired-state type") {
+			t.Errorf("%s plan: type-mismatch bug reappeared: %v", name, err)
 		}
 	}
 }

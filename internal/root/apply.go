@@ -71,8 +71,10 @@ func runApply(action mgrAction) func(*cobra.Command, []string) error {
 				return fmt.Errorf("refusing to apply without --yes")
 			}
 			r, err := orch.Apply(ctx)
-			fmt.Printf("apply: applied=%d skipped=%d failed=%d\n",
-				len(r.Applied), len(r.Skipped), len(r.Failed))
+			if r != nil {
+				fmt.Printf("apply: applied=%d skipped=%d failed=%d\n",
+					len(r.Applied), len(r.Skipped), len(r.Failed))
+			}
 			return err
 		case actionVerify:
 			v, err := orch.Verify(ctx)
