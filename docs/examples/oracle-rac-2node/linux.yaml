@@ -1,0 +1,122 @@
+kind: Linux
+apiVersion: linuxctl.itunified.io/v1alpha1
+
+# Oracle 19c RAC 2-node host prep example (Linux layer only).
+# Covers the OS prerequisites: grid/oracle users, +DATA/+RECO mount points,
+# sysctl + limits presets, firewall, and shared secure shell setup for the
+# cluster (SetupClusterSSH wires grid/oracle ssh keys across both nodes).
+
+disk_layout:
+  additional:
+    - role: oracle-data
+      vg_name: vg_data
+      logical_volumes:
+        - name: u01
+          mount_point: /u01
+          size: 100G
+          fs: xfs
+        - name: u02
+          mount_point: /u02
+          size: 200G
+          fs: xfs
+
+users_groups:
+  groups:
+    - name: oinstall
+      gid: 54321
+    - name: dba
+      gid: 54322
+    - name: asmadmin
+      gid: 54323
+    - name: asmdba
+      gid: 54324
+    - name: asmoper
+      gid: 54325
+  users:
+    - name: grid
+      uid: 54331
+      gid: oinstall
+      groups:
+        - oinstall
+        - asmadmin
+        - asmdba
+        - asmoper
+      home: /home/grid
+      shell: /bin/bash
+    - name: oracle
+      uid: 54321
+      gid: oinstall
+      groups:
+        - oinstall
+        - dba
+        - asmdba
+      home: /home/oracle
+      shell: /bin/bash
+
+directories:
+  - path: /u01/app/19c/grid
+    owner: grid
+    group: oinstall
+    mode: "0775"
+    recursive: true
+  - path: /u01/app/oracle/product/19c/dbhome_1
+    owner: oracle
+    group: oinstall
+    mode: "0775"
+    recursive: true
+
+packages:
+  install:
+    - oracle-database-preinstall-19c
+    - chrony
+    - nfs-utils
+
+sysctl_preset: oracle-19c
+limits_preset: oracle-19c
+
+firewall:
+  enabled: true
+  zones:
+    public:
+      ports:
+        - name: ssh
+          port: 22
+          proto: tcp
+        - name: oracle-listener
+          port: 1521
+          proto: tcp
+        - name: oracle-ons
+          port: 6200
+          proto: tcp
+
+services:
+  - name: chronyd
+    enabled: true
+    state: running
+  - name: firewalld
+    enabled: true
+    state: running
+
+hosts_entries:
+  - ip: 10.0.10.11
+    names:
+      - rac01
+      - rac01.lab.internal
+  - ip: 10.0.10.12
+    names:
+      - rac02
+      - rac02.lab.internal
+  - ip: 10.0.20.11
+    names:
+      - rac01-priv
+  - ip: 10.0.20.12
+    names:
+      - rac02-priv
+
+selinux:
+  mode: permissive
+
+ssh:
+  authorized_keys:
+    root:
+      - "ssh-ed25519 AAAA... operator-workstation"
