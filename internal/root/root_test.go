@@ -3,6 +3,7 @@ package root
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -559,17 +560,11 @@ func TestSSH_StubSubcommands(t *testing.T) {
 	}
 }
 
-func TestSSH_SetupCluster_RequiresUser(t *testing.T) {
+func TestSSH_SetupCluster_RequiresEnvOrHost(t *testing.T) {
+	// No env.yaml positional + no --host → error.
 	_, err := executeCmd(t, "ssh", "setup-cluster")
-	if err == nil || !strings.Contains(err.Error(), "--user") {
-		t.Errorf("expected --user required, got %v", err)
-	}
-}
-
-func TestSSH_SetupCluster_RequiresHost(t *testing.T) {
-	_, err := executeCmd(t, "ssh", "setup-cluster", "--user", "grid")
-	if err == nil || !strings.Contains(err.Error(), "--host") {
-		t.Errorf("expected --host required, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "env.yaml") {
+		t.Errorf("expected env.yaml or --host required, got %v", err)
 	}
 }
 
@@ -956,4 +951,143 @@ func TestContextIsBackground(t *testing.T) {
 		t.Error("fresh ctx should not be canceled")
 	}
 	_ = context.Background() // nolint
+}
+
+// ---- ssh setup-cluster env.yaml wiring -----------------------------------
+
+// fakeSSHSession implements session.Session + managers.SessionRunner, always
+// returning a __MISSING__ probe + fake pubkey so SetupClusterSSH can complete
+// end-to-end without any real network I/O.
+type fakeSSHSession struct {
+	host string
+	cmds []string
+}
+
+func (f *fakeSSHSession) Host() string { return f.host }
+func (f *fakeSSHSession) Run(_ context.Context, cmd string) (string, string, error) {
+	f.cmds = append(f.cmds, cmd)
+	if strings.Contains(cmd, "test -f") {
+		return "__MISSING__\n", "", nil
+	}
+	if strings.Contains(cmd, "id_ed25519.pub") && strings.Contains(cmd, "cat ") {
+		return "ssh-ed25519 FAKE " + f.host + "\n", "", nil
+	}
+	if strings.Contains(cmd, "ssh-keyscan") {
+		return f.host + " ssh-ed25519 SCANPUB\n", "", nil
+	}
+	return "", "", nil
+}
+func (f *fakeSSHSession) RunSudo(ctx context.Context, cmd string) (string, string, error) {
+	return f.Run(ctx, cmd)
+}
+func (f *fakeSSHSession) WriteFile(context.Context, string, []byte, uint32) error { return nil }
+func (f *fakeSSHSession) ReadFile(context.Context, string) ([]byte, error)        { return nil, nil }
+func (f *fakeSSHSession) FileExists(context.Context, string) (bool, error)        { return true, nil }
+func (f *fakeSSHSession) Close() error                                            { return nil }
+
+func writeEnvWithNodes(t *testing.T, nodes ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	ly := filepath.Join(dir, "linux.yaml")
+	if err := os.WriteFile(ly, []byte("kind: Linux\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var nodeLines string
+	for _, n := range nodes {
+		nodeLines += "      " + n + ": {}\n"
+	}
+	env := filepath.Join(dir, "env.yaml")
+	y := `version: "1"
+kind: Env
+metadata:
+  name: rac-uat
+spec:
+  linux:
+    $ref: ./linux.yaml
+  hypervisor:
+    kind: proxmox
+    nodes:
+` + nodeLines
+	if err := os.WriteFile(env, []byte(y), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func TestSSHSetupCluster_FromEnv_TwoNodes(t *testing.T) {
+	env := writeEnvWithNodes(t, "n1.example", "n2.example")
+
+	prev := dialSSH
+	dialSSH = func(host, user string, port int, key string) (session.Session, error) {
+		return &fakeSSHSession{host: host}, nil
+	}
+	t.Cleanup(func() { dialSSH = prev })
+
+	out, err := executeCmd(t, "ssh", "setup-cluster", env,
+		"--ssh-user", "claude", "--user", "grid")
+	if err != nil {
+		t.Fatalf("setup-cluster: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "cluster ssh setup: 2 node(s)") {
+		t.Errorf("missing header in output: %s", out)
+	}
+	for _, want := range []string{"n1.example", "n2.example"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing node %q: %s", want, out)
+		}
+	}
+}
+
+func TestSSHSetupCluster_FromEnv_EmptyNodes(t *testing.T) {
+	// env.yaml without any hypervisor.nodes entries.
+	dir := t.TempDir()
+	ly := filepath.Join(dir, "linux.yaml")
+	_ = os.WriteFile(ly, []byte("kind: Linux\n"), 0o600)
+	env := filepath.Join(dir, "env.yaml")
+	_ = os.WriteFile(env, []byte(`version: "1"
+kind: Env
+metadata:
+  name: empty
+spec:
+  linux:
+    $ref: ./linux.yaml
+  hypervisor:
+    kind: proxmox
+`), 0o600)
+
+	_, err := executeCmd(t, "ssh", "setup-cluster", env, "--ssh-user", "x")
+	if err == nil || !strings.Contains(err.Error(), "nodes") {
+		t.Errorf("expected nodes error, got %v", err)
+	}
+}
+
+func TestSSHSetupCluster_FromEnv_LoadFails(t *testing.T) {
+	_, err := executeCmd(t, "ssh", "setup-cluster", "/nonexistent/env.yaml", "--ssh-user", "x")
+	if err == nil || !strings.Contains(err.Error(), "load env") {
+		t.Errorf("expected load-env error, got %v", err)
+	}
+}
+
+func TestSSHSetupCluster_FromEnv_AllDialsFail(t *testing.T) {
+	env := writeEnvWithNodes(t, "n1", "n2")
+	prev := dialSSH
+	dialSSH = func(host, user string, port int, key string) (session.Session, error) {
+		return nil, fmt.Errorf("connection refused for %s", host)
+	}
+	t.Cleanup(func() { dialSSH = prev })
+
+	_, err := executeCmd(t, "ssh", "setup-cluster", env, "--ssh-user", "c")
+	if err == nil || !strings.Contains(err.Error(), "no nodes dialable") {
+		t.Errorf("expected no-nodes-dialable error, got %v", err)
+	}
+}
+
+// dialSSHReal smoke test — exercises the real dialer against a non-listening
+// port so we cover both code paths (call + error return) without dialing real
+// SSH.
+func TestDialSSHReal_ConnectionFails(t *testing.T) {
+	_, err := dialSSHReal("127.0.0.1", "nobody", 1, "/nonexistent/key")
+	if err == nil {
+		t.Skip("unexpected successful dial on 127.0.0.1:1")
+	}
 }
