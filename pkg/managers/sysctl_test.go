@@ -320,6 +320,34 @@ func TestSysctl_ParseFile(t *testing.T) {
 	}
 }
 
+func TestSysctl_Rollback_NoSession(t *testing.T) {
+	s := NewSysctlManager()
+	if err := s.Rollback(context.Background(), []Change{{}}); err == nil {
+		t.Error("want session-required")
+	}
+}
+
+func TestSysctl_Rollback_SkipsBadBefore(t *testing.T) {
+	ms := newFileMock()
+	s := NewSysctlManager().WithSession(ms)
+	changes := []Change{{Action: "update", Before: "not a sysctlSnap"}}
+	if err := s.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.writes) != 0 {
+		t.Error("should not write")
+	}
+}
+
+func TestSysctl_Apply_WrongAfterType(t *testing.T) {
+	ms := newFileMock()
+	s := NewSysctlManager().WithSession(ms)
+	res, _ := s.Apply(context.Background(), []Change{{Action: "update", After: "bad"}}, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("want 1 failed")
+	}
+}
+
 func TestSysctl_Plan_PresetMerge(t *testing.T) {
 	ms := newFileMock()
 	for _, k := range []string{"fs.aio-max-nr", "fs.file-max", "kernel.panic_on_oops",

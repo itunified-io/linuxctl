@@ -227,3 +227,70 @@ func TestDir_Registered(t *testing.T) {
 func TestDir_InterfaceCompliance(t *testing.T) {
 	var _ Manager = NewDirManager()
 }
+
+func TestDir_ApplyAfterWrongType(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "create", After: "not a Directory"}}
+	res, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestDir_ApplyUnknownAction(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "weird", After: config.Directory{Path: "/x"}}}
+	res, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestDir_CastFromValueLinux(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	l := config.Linux{Directories: []config.Directory{{Path: "/opt/x"}}}
+	changes, err := dm.Plan(context.Background(), l, nil)
+	require.NoError(t, err)
+	require.Len(t, changes, 1)
+}
+
+func TestDir_CastNilLinux(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	var l *config.Linux
+	changes, err := dm.Plan(context.Background(), l, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes)
+}
+
+func TestDir_Rollback_SkipNonDirectoryAfter(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "create", After: "not a Directory"}}
+	require.NoError(t, dm.Rollback(context.Background(), changes))
+	require.Empty(t, mock.sudoRuns)
+}
+
+func TestDir_ApplyAttrs_ChownNoRecurse(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	d := config.Directory{Path: "/a", Owner: "u"}
+	changes := []Change{{Action: "update", After: d}}
+	_, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "chown 'u'")
+	require.NotContains(t, joined, "chmod")
+}
+
+func TestDir_ApplyAttrs_GroupOnly(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	d := config.Directory{Path: "/a", Group: "g"}
+	changes := []Change{{Action: "update", After: d}}
+	_, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "chown ':g'")
+}

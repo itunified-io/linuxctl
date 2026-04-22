@@ -220,6 +220,34 @@ func TestLimits_CastLinuxForLimits_Variants(t *testing.T) {
 	}
 }
 
+func TestLimits_Apply_WrongAfterType(t *testing.T) {
+	ms := newFileMock()
+	l := NewLimitsManager().WithSession(ms)
+	res, _ := l.Apply(context.Background(), []Change{{Action: "update", After: "bad"}}, false)
+	if len(res.Failed) != 1 {
+		t.Error("want 1 failed")
+	}
+}
+
+func TestLimits_Rollback_NoSession(t *testing.T) {
+	l := NewLimitsManager()
+	if err := l.Rollback(context.Background(), []Change{{}}); err == nil {
+		t.Error("want session-required")
+	}
+}
+
+func TestLimits_Rollback_BadBeforeSkipped(t *testing.T) {
+	ms := newFileMock()
+	l := NewLimitsManager().WithSession(ms)
+	changes := []Change{{Action: "update", Before: "not a snap"}}
+	if err := l.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.writes) != 0 {
+		t.Error("should not write")
+	}
+}
+
 func TestLimits_PresetOnly_DriftWhenMissing(t *testing.T) {
 	ms := newFileMock()
 	l := NewLimitsManager().WithSession(ms)
