@@ -2,8 +2,42 @@
 package root
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 )
+
+// envVarNameStack is the canonical env var name for the default stack (#17).
+const envVarNameStack = "LINUXCTL_STACK"
+
+// envVarNameEnv is the deprecated alias for LINUXCTL_STACK. Kept for one
+// release; remove in the next major release.
+const envVarNameEnv = "LINUXCTL_ENV"
+
+// applyEnvVarDefaults reads LINUXCTL_STACK / LINUXCTL_ENV and fills gf.stack
+// / gf.env when the corresponding CLI flags were not explicitly set. Command-
+// line flags still win over env vars. If both env vars are set, LINUXCTL_STACK
+// wins and a warning is emitted.
+func applyEnvVarDefaults() {
+	stackEnv := os.Getenv(envVarNameStack)
+	envEnv := os.Getenv(envVarNameEnv)
+	if gf.stack == "" && stackEnv != "" {
+		gf.stack = stackEnv
+	}
+	if gf.env == "" && envEnv != "" {
+		if gf.stack != "" && stackEnv == "" {
+			// --stack already set from flags; ignore legacy env var silently.
+		}
+		gf.env = envEnv
+		if stackEnv == "" {
+			fmt.Fprintln(os.Stderr, "warning: LINUXCTL_ENV is deprecated; use LINUXCTL_STACK instead")
+		}
+	}
+	if stackEnv != "" && envEnv != "" && stackEnv != envEnv {
+		fmt.Fprintln(os.Stderr, "warning: both LINUXCTL_STACK and LINUXCTL_ENV set; LINUXCTL_STACK wins (LINUXCTL_ENV is deprecated)")
+	}
+}
 
 // BuildInfo is injected from main.
 type BuildInfo struct {
@@ -36,6 +70,14 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		Short:        "Declarative, idempotent, auditable Linux host configuration",
 		Long:         "linuxctl converges a Linux host to the desired state defined in linux.yaml. Plan / Apply / Verify / Rollback across 13 subsystems over SSH.",
 		SilenceUsage: true,
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			// Env var defaults (LINUXCTL_STACK; LINUXCTL_ENV deprecated).
+			applyEnvVarDefaults()
+			// Auto-migrate ~/.linuxctl/envs.yaml → ~/.linuxctl/stacks.yaml (#17).
+			// Failures are non-fatal; MigrateRegistry prints its own warnings.
+			_ = MigrateRegistry()
+			return nil
+		},
 	}
 
 	pf := cmd.PersistentFlags()
