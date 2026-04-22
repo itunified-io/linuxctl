@@ -1,0 +1,11 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: minimal-host
+  category: bundles
+  tier: community
+  source: "Minimal host baseline (no DB). Only ensures cifs-utils is installed."
+  version: "2026-04-22"
+spec:
+  bundle:
+    packages_preset: minimal-host

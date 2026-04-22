@@ -1,0 +1,14 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: pg-16
+  category: packages
+  tier: community
+  source: "PostgreSQL 16 PGDG packages (RHEL-flavored names; Debian stacks override)"
+  version: "2026-04-22"
+spec:
+  packages:
+    install:
+      - postgresql16
+      - postgresql16-server
+      - postgresql16-contrib

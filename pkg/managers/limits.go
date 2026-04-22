@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
+	"github.com/itunified-io/linuxctl/pkg/presets"
 	"github.com/itunified-io/linuxctl/pkg/session"
 )
 
@@ -39,33 +40,22 @@ func init() { Register(NewLimitsManager()) }
 
 // ---- Preset ---------------------------------------------------------------
 
-// presetLimits returns hardcoded limits entries for a named preset.
+// presetLimits resolves a named limits preset via the pkg/presets registry.
 func presetLimits(name string) []config.LimitEntry {
-	switch name {
-	case "":
-		return nil
-	case "oracle-19c":
-		var out []config.LimitEntry
-		for _, user := range []string{"grid", "oracle"} {
-			out = append(out,
-				config.LimitEntry{User: user, Type: "soft", Item: "nofile", Value: "1024"},
-				config.LimitEntry{User: user, Type: "hard", Item: "nofile", Value: "65536"},
-				config.LimitEntry{User: user, Type: "soft", Item: "nproc", Value: "16384"},
-				config.LimitEntry{User: user, Type: "hard", Item: "nproc", Value: "16384"},
-				config.LimitEntry{User: user, Type: "soft", Item: "stack", Value: "10240"},
-				config.LimitEntry{User: user, Type: "hard", Item: "stack", Value: "32768"},
-				config.LimitEntry{User: user, Type: "soft", Item: "memlock", Value: "134217728"},
-				config.LimitEntry{User: user, Type: "hard", Item: "memlock", Value: "134217728"},
-			)
-		}
-		return out
-	case "pg-16", "hardened-cis":
-		log.Printf("limits: preset %q not yet populated; Phase 4b", name)
-		return nil
-	default:
-		log.Printf("limits: unknown preset %q", name)
+	if name == "" {
 		return nil
 	}
+	p, err := presets.ResolveCategory("limits", name, nil)
+	if err != nil {
+		log.Printf("limits: preset %q: %v", name, err)
+		return nil
+	}
+	entries, err := presets.LimitsSpec(p)
+	if err != nil {
+		log.Printf("limits: preset %q decode: %v", name, err)
+		return nil
+	}
+	return entries
 }
 
 // limitKey uniquely identifies a limit row for dedup / merge.

@@ -20,8 +20,9 @@ func TestLimits_PresetExpansion(t *testing.T) {
 	if users["grid"] != 8 || users["oracle"] != 8 {
 		t.Errorf("expected 8 entries per user, got %+v", users)
 	}
-	if got := presetLimits("pg-16"); got != nil {
-		t.Errorf("pg-16 should stub to nil, got %d", len(got))
+	// pg-16 now ships real content via the conventions library (plan 033).
+	if got := presetLimits("pg-16"); len(got) == 0 {
+		t.Errorf("pg-16 should now be populated (plan 033), got %d", len(got))
 	}
 	if got := presetLimits(""); got != nil {
 		t.Error("empty preset should yield nil")

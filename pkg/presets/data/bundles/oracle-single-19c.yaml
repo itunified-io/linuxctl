@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: oracle-single-19c
+  category: bundles
+  tier: community
+  source: "Oracle Database 19c single-instance baseline"
+  version: "2026-04-22"
+spec:
+  bundle:
+    directories_preset: oracle-ofa-19c
+    users_groups_preset: oracle-single
+    packages_preset: oracle-19c
+    sysctl_preset: oracle-19c
+    limits_preset: oracle-19c

@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: pg-single-16
+  category: bundles
+  tier: community
+  source: "PostgreSQL 16 single-instance baseline"
+  version: "2026-04-22"
+spec:
+  bundle:
+    directories_preset: pg-ofa-16
+    users_groups_preset: pg-user
+    packages_preset: pg-16
+    sysctl_preset: pg-16
+    limits_preset: pg-16

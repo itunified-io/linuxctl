@@ -8,8 +8,50 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BundleExpander is an optional hook that pkg/presets wires into the loader
+// to expand `bundle_preset` into per-category *_preset fields. The loader
+// stays free of a pkg/presets import to avoid a cycle; pkg/presets calls
+// RegisterBundleExpander() in its init().
+type BundleExpander func(name string) (map[string]string, error)
+
+var bundleExpander BundleExpander
+
+// RegisterBundleExpander wires an expander. pkg/presets calls this from init.
+func RegisterBundleExpander(fn BundleExpander) { bundleExpander = fn }
+
+// expandBundleOnLinux fills the per-category *_preset fields from the named
+// bundle, but only for fields the user left empty. Explicit per-category
+// presets always win over the bundle.
+func expandBundleOnLinux(l *Linux) error {
+	if l == nil || l.BundlePreset == "" || bundleExpander == nil {
+		return nil
+	}
+	children, err := bundleExpander(l.BundlePreset)
+	if err != nil {
+		return fmt.Errorf("bundle %q: %w", l.BundlePreset, err)
+	}
+	if l.DirectoriesPreset == "" {
+		l.DirectoriesPreset = children["directories"]
+	}
+	if l.UsersGroupsPreset == "" {
+		l.UsersGroupsPreset = children["users_groups"]
+	}
+	if l.PackagesPreset == "" {
+		l.PackagesPreset = children["packages"]
+	}
+	if l.SysctlPreset == "" {
+		l.SysctlPreset = children["sysctl"]
+	}
+	if l.LimitsPreset == "" {
+		l.LimitsPreset = children["limits"]
+	}
+	return nil
+}
+
 // LoadLinux reads and decodes a linux.yaml from disk without validation.
-// An empty path returns an empty Linux (scaffold behaviour).
+// If the manifest declares `bundle_preset:`, the bundle is expanded into
+// the per-category *_preset fields (user overrides always win). An empty
+// path returns an empty Linux (scaffold behaviour).
 func LoadLinux(path string) (*Linux, error) {
 	if path == "" {
 		return &Linux{}, nil
@@ -21,6 +63,9 @@ func LoadLinux(path string) (*Linux, error) {
 	var l Linux
 	if err := yaml.Unmarshal(b, &l); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := expandBundleOnLinux(&l); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &l, nil
 }
@@ -65,6 +110,13 @@ func LoadEnv(path string, r *Resolver) (*Env, error) {
 		env.Spec.Linux.Value = l
 	} else if env.Spec.Linux.Inline != nil {
 		env.Spec.Linux.Value = env.Spec.Linux.Inline
+	}
+
+	// Expand bundle_preset on the resolved Linux manifest (if any).
+	if env.Spec.Linux.Value != nil {
+		if err := expandBundleOnLinux(env.Spec.Linux.Value); err != nil {
+			return nil, err
+		}
 	}
 
 	// Resolve secret placeholders.

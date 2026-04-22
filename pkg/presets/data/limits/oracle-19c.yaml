@@ -1,0 +1,26 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-19c
+  category: limits
+  tier: community
+  source: "Oracle Database 19c pre-install resource limits (migrated from pkg/managers/limits.go)"
+  version: "2026-04-22"
+spec:
+  limits:
+    - { user: "grid",   type: "soft", item: "nofile",  value: "1024" }
+    - { user: "grid",   type: "hard", item: "nofile",  value: "65536" }
+    - { user: "grid",   type: "soft", item: "nproc",   value: "16384" }
+    - { user: "grid",   type: "hard", item: "nproc",   value: "16384" }
+    - { user: "grid",   type: "soft", item: "stack",   value: "10240" }
+    - { user: "grid",   type: "hard", item: "stack",   value: "32768" }
+    - { user: "grid",   type: "soft", item: "memlock", value: "134217728" }
+    - { user: "grid",   type: "hard", item: "memlock", value: "134217728" }
+    - { user: "oracle", type: "soft", item: "nofile",  value: "1024" }
+    - { user: "oracle", type: "hard", item: "nofile",  value: "65536" }
+    - { user: "oracle", type: "soft", item: "nproc",   value: "16384" }
+    - { user: "oracle", type: "hard", item: "nproc",   value: "16384" }
+    - { user: "oracle", type: "soft", item: "stack",   value: "10240" }
+    - { user: "oracle", type: "hard", item: "stack",   value: "32768" }
+    - { user: "oracle", type: "soft", item: "memlock", value: "134217728" }
+    - { user: "oracle", type: "hard", item: "memlock", value: "134217728" }

@@ -3,10 +3,12 @@ package managers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
+	"github.com/itunified-io/linuxctl/pkg/presets"
 	"github.com/itunified-io/linuxctl/pkg/session"
 )
 
@@ -236,8 +238,12 @@ func (m *DirManager) Rollback(ctx context.Context, changes []Change) error {
 }
 
 // castDirectories accepts either []config.Directory, *config.Linux, or a
-// generic Spec carrying Directories.
+// generic Spec carrying Directories. When a *config.Linux carries a
+// DirectoriesPreset, the preset entries are merged with explicit entries
+// (explicit wins on path collision).
 func castDirectories(desired Spec) ([]config.Directory, error) {
+	var explicit []config.Directory
+	var presetName string
 	switch v := desired.(type) {
 	case []config.Directory:
 		return v, nil
@@ -245,12 +251,28 @@ func castDirectories(desired Spec) ([]config.Directory, error) {
 		if v == nil {
 			return nil, nil
 		}
-		return v.Directories, nil
+		explicit = v.Directories
+		presetName = v.DirectoriesPreset
 	case config.Linux:
-		return v.Directories, nil
+		explicit = v.Directories
+		presetName = v.DirectoriesPreset
 	case nil:
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("dir: unsupported desired-state type %T", desired)
 	}
+	if presetName == "" {
+		return explicit, nil
+	}
+	p, err := presets.ResolveCategory("directories", presetName, nil)
+	if err != nil {
+		log.Printf("dir: preset %q: %v", presetName, err)
+		return explicit, nil
+	}
+	pdirs, err := presets.DirectoriesSpec(p)
+	if err != nil {
+		log.Printf("dir: preset %q decode: %v", presetName, err)
+		return explicit, nil
+	}
+	return presets.MergeDirectories(explicit, pdirs), nil
 }

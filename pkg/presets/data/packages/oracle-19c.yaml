@@ -1,0 +1,14 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-19c
+  category: packages
+  tier: community
+  source: "Oracle Linux oracle-database-preinstall-19c metapackage + kmod-oracleasm"
+  version: "2026-04-22"
+spec:
+  packages:
+    install:
+      - oracle-database-preinstall-19c
+      - kmod-oracleasm
+      - cifs-utils

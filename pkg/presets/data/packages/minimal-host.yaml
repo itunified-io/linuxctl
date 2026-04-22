@@ -1,0 +1,12 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: minimal-host
+  category: packages
+  tier: community
+  source: "Minimal host package baseline (CIFS client for software mounts)"
+  version: "2026-04-22"
+spec:
+  packages:
+    install:
+      - cifs-utils

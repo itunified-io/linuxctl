@@ -15,6 +15,13 @@ type Linux struct {
 	SysctlPreset string         `yaml:"sysctl_preset,omitempty"`
 	Limits       []LimitEntry   `yaml:"limits,omitempty" validate:"dive"`
 	LimitsPreset string         `yaml:"limits_preset,omitempty"`
+	// DirectoriesPreset, UsersGroupsPreset, PackagesPreset, BundlePreset:
+	// plan 033 conventions library. Resolved at config-load time (bundle)
+	// and per-manager Plan() (individual *_preset fields).
+	DirectoriesPreset string `yaml:"directories_preset,omitempty"`
+	UsersGroupsPreset string `yaml:"users_groups_preset,omitempty"`
+	PackagesPreset    string `yaml:"packages_preset,omitempty"`
+	BundlePreset      string `yaml:"bundle_preset,omitempty"`
 	Firewall     *Firewall      `yaml:"firewall,omitempty"`
 	HostsEntries []HostEntry    `yaml:"hosts_entries,omitempty" validate:"dive"`
 	Services     []ServiceState `yaml:"services,omitempty" validate:"dive"`

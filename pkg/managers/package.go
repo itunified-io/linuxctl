@@ -3,8 +3,12 @@ package managers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
+
+	"github.com/itunified-io/linuxctl/pkg/config"
+	"github.com/itunified-io/linuxctl/pkg/presets"
 )
 
 // PackagesSpec is the desired state for the package manager. Install and
@@ -367,6 +371,10 @@ func containsAny(haystack string, needles ...string) bool {
 	return false
 }
 
+// castPackages normalises a desired Spec into a PackagesSpec. When a
+// *config.Linux is supplied and PackagesPreset is set, the preset is merged
+// with explicit package lists (union of Install + Remove, explicit wins on
+// install/remove conflict).
 func castPackages(desired Spec) (PackagesSpec, error) {
 	switch v := desired.(type) {
 	case PackagesSpec:
@@ -376,9 +384,36 @@ func castPackages(desired Spec) (PackagesSpec, error) {
 			return PackagesSpec{}, nil
 		}
 		return *v, nil
+	case *config.Linux:
+		if v == nil {
+			return PackagesSpec{}, nil
+		}
+		return packagesFromLinux(v), nil
+	case config.Linux:
+		return packagesFromLinux(&v), nil
 	case nil:
 		return PackagesSpec{}, nil
 	default:
 		return PackagesSpec{}, fmt.Errorf("package: unsupported desired-state type %T", desired)
 	}
+}
+
+func packagesFromLinux(l *config.Linux) PackagesSpec {
+	explicit := config.Packages{}
+	if l.Packages != nil {
+		explicit = *l.Packages
+	}
+	merged := explicit
+	if l.PackagesPreset != "" {
+		if p, err := presets.ResolveCategory("packages", l.PackagesPreset, nil); err == nil {
+			if pp, err := presets.PackagesSpec(p); err == nil && pp != nil {
+				merged = presets.MergePackages(explicit, *pp)
+			} else if err != nil {
+				log.Printf("package: preset %q decode: %v", l.PackagesPreset, err)
+			}
+		} else {
+			log.Printf("package: preset %q: %v", l.PackagesPreset, err)
+		}
+	}
+	return PackagesSpec{Install: merged.Install, Remove: merged.Remove}
 }

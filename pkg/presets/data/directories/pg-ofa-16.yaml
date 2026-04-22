@@ -1,0 +1,18 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: pg-ofa-16
+  category: directories
+  tier: community
+  source: "PostgreSQL 16 packaging conventions (PGDG Debian/RHEL)"
+  version: "2026-04-22"
+spec:
+  directories:
+    # PGDG convention: /var/lib/pgsql/16/data on RHEL,
+    # /var/lib/postgresql/16/main on Debian — we ship the RHEL layout by
+    # default; Debian stacks can override via explicit directories.
+    - { path: "/var/lib/pgsql",                owner: "postgres", group: "postgres", mode: "0700" }
+    - { path: "/var/lib/pgsql/16",             owner: "postgres", group: "postgres", mode: "0700" }
+    - { path: "/var/lib/pgsql/16/data",        owner: "postgres", group: "postgres", mode: "0700" }
+    - { path: "/var/lib/pgsql/16/backups",     owner: "postgres", group: "postgres", mode: "0700" }
+    - { path: "/var/log/postgresql",           owner: "postgres", group: "postgres", mode: "0755" }
