@@ -63,7 +63,8 @@ checksum:
   name_template: checksums.txt
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  # CalVer-compatible (incpatch expects semver; fails on CalVer tags like v2026.04.11.7)
+  version_template: "{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}"
 
 changelog:
   sort: asc
