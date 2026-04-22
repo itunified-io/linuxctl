@@ -1,30 +1,26 @@
 package root
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 func newMountCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mount",
+		Use:   "mount [env.yaml|linux.yaml]",
 		Short: "Manage mount state (plan / apply / verify)",
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "plan",
-		Short: "Preview mount changes against the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("mount plan: not implemented") },
+		Use:   "plan [env.yaml|linux.yaml]",
+		Short: "Preview mount changes",
+		RunE:  runManager("mount", actionPlan),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "apply",
-		Short: "Apply mount changes to reach the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("mount apply: not implemented") },
+		Use:   "apply [env.yaml|linux.yaml]",
+		Short: "Apply mount changes",
+		RunE:  runManager("mount", actionApply),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "verify",
-		Short: "Verify observed mount state matches desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("mount verify: not implemented") },
+		Use:   "verify [env.yaml|linux.yaml]",
+		Short: "Verify mount state",
+		RunE:  runManager("mount", actionVerify),
 	})
 	return cmd
 }
