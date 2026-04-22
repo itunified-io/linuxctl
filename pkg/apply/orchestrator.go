@@ -13,23 +13,38 @@ import (
 	"github.com/itunified-io/linuxctl/pkg/session"
 )
 
-// defaultOrder is the hardcoded Phase-3 dependency order. Within the DAG this
-// ordering satisfies: disk → user → dir → package → mount → remaining.
-// Additional managers run last in stable name order.
+// defaultOrder is the Phase-4 full 13-manager dependency order.
+//
+//  1. disk     — partition/VG/LV before anything else depends on storage
+//  2. package  — install early so user tools, oracleasm, cifs-utils are present
+//  3. user     — after packages (some users are created by package post-install)
+//  4. dir      — directories reference owners created by user
+//  5. mount    — fstab entries reference users; need cifs-utils from package
+//  6. sysctl   — kernel params; no user deps
+//  7. limits   — /etc/security/limits.d; no deps
+//  8. hosts    — /etc/hosts entries; no deps
+//  9. ssh      — authorized_keys + sshd_config drop-in; depends on users
+// 10. selinux  — policies + booleans after packages that ship selinux-policy
+// 11. firewall — after packages install firewalld/ufw
+// 12. network  — hostname + resolv.conf, late so lookups survive dependencies
+// 13. service  — enable/start LAST so every dependency resolves first
+//
+// Managers not in this list still run — after the ordered block, in registry
+// iteration order. Missing managers are skipped cleanly.
 var defaultOrder = []string{
 	"disk",
+	"package",
 	"user",
 	"dir",
-	"package",
 	"mount",
-	"service",
 	"sysctl",
 	"limits",
-	"firewall",
 	"hosts",
-	"network",
-	"ssh_auth",
+	"ssh",
 	"selinux",
+	"firewall",
+	"network",
+	"service",
 }
 
 // Orchestrator runs the full plan/apply/verify/rollback pipeline across

@@ -4,6 +4,26 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.3 — 2026-04-19
+
+### Added — Phase 4: 8 remaining managers + full 13-manager orchestrator (#3)
+
+- **service**: systemd enable/disable/start/stop/restart with Before-snapshot rollback (81.2% coverage)
+- **sysctl**: kernel params via `/etc/sysctl.d/99-linuxctl.conf` drop-in + live `sysctl -n` drift check; `oracle-19c` preset (10 params) (84.0%)
+- **limits**: `/etc/security/limits.d/99-linuxctl.conf` drop-in; `oracle-19c` preset (16 entries for grid+oracle) (85.5%)
+- **firewall**: firewalld / ufw distro dispatch; ports + sources add/remove; enable/disable (~65%)
+- **hosts**: `/etc/hosts` managed block (`# BEGIN linuxctl` / `# END linuxctl`) (~85%)
+- **network**: hostname + /etc/resolv.conf (NIC management deferred to Phase 4b) (~78%)
+- **ssh**: authorized_keys + `/etc/ssh/sshd_config.d/99-linuxctl.conf` drop-in with `sshd -t` validate; `SetupClusterSSH` for RAC cluster trust
+- **selinux**: mode (enforcing/permissive/disabled) + booleans; HazardDestructive flag on `disabled` (reboot required)
+- `pkg/apply` orchestrator: full 13-manager dependency order (disk → package → user → dir → mount → sysctl → limits → hosts → ssh → selinux → firewall → network → service) (78.4%)
+- `linuxctl ssh setup-cluster <env.yaml>` CLI for per-user Ed25519 keypair gen + cross-authorization across nodes
+
+### Pending (Phase 4b)
+
+- Full NIC management (nmcli/networkd connection add/modify)
+- Additional presets: `pg-16`, `hardened-cis` (stubs exist, content TBD)
+
 ## v2026.04.11.2 — 2026-04-19
 
 ### Added — Phase 3 core implementation (#1)
