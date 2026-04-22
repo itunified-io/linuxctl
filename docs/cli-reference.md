@@ -24,14 +24,6 @@ Auto-generated from the Cobra command tree via `cmd/docgen`. Regenerate with `ma
 - [`linuxctl disk apply`](cli/linuxctl_disk_apply.md)
 - [`linuxctl disk plan`](cli/linuxctl_disk_plan.md)
 - [`linuxctl disk verify`](cli/linuxctl_disk_verify.md)
-- [`linuxctl env`](cli/linuxctl_env.md)
-- [`linuxctl env add`](cli/linuxctl_env_add.md)
-- [`linuxctl env current`](cli/linuxctl_env_current.md)
-- [`linuxctl env list`](cli/linuxctl_env_list.md)
-- [`linuxctl env new`](cli/linuxctl_env_new.md)
-- [`linuxctl env remove`](cli/linuxctl_env_remove.md)
-- [`linuxctl env show`](cli/linuxctl_env_show.md)
-- [`linuxctl env use`](cli/linuxctl_env_use.md)
 - [`linuxctl firewall`](cli/linuxctl_firewall.md)
 - [`linuxctl firewall apply`](cli/linuxctl_firewall_apply.md)
 - [`linuxctl firewall plan`](cli/linuxctl_firewall_plan.md)
@@ -73,6 +65,14 @@ Auto-generated from the Cobra command tree via `cmd/docgen`. Regenerate with `ma
 - [`linuxctl ssh plan`](cli/linuxctl_ssh_plan.md)
 - [`linuxctl ssh setup-cluster`](cli/linuxctl_ssh_setup-cluster.md)
 - [`linuxctl ssh verify`](cli/linuxctl_ssh_verify.md)
+- [`linuxctl stack`](cli/linuxctl_stack.md)
+- [`linuxctl stack add`](cli/linuxctl_stack_add.md)
+- [`linuxctl stack current`](cli/linuxctl_stack_current.md)
+- [`linuxctl stack list`](cli/linuxctl_stack_list.md)
+- [`linuxctl stack new`](cli/linuxctl_stack_new.md)
+- [`linuxctl stack remove`](cli/linuxctl_stack_remove.md)
+- [`linuxctl stack show`](cli/linuxctl_stack_show.md)
+- [`linuxctl stack use`](cli/linuxctl_stack_use.md)
 - [`linuxctl sysctl`](cli/linuxctl_sysctl.md)
 - [`linuxctl sysctl apply`](cli/linuxctl_sysctl_apply.md)
 - [`linuxctl sysctl plan`](cli/linuxctl_sysctl_plan.md)
@@ -87,4 +87,4 @@ Auto-generated from the Cobra command tree via `cmd/docgen`. Regenerate with `ma
 
 - Every subsystem manager command exposes `plan`, `apply`, `verify` verbs.
 - `linuxctl apply ...` orchestrates the full 13-manager DAG.
-- Persistent flags `--env`, `--host`, `--yes`, `--dry-run`, `--format` apply across the tree.
+- Persistent flags `--stack`, `--host`, `--yes`, `--dry-run`, `--format` apply across the tree. `--env` remains as a deprecated alias for one release (#17).

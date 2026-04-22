@@ -11,11 +11,11 @@ linuxctl converges a Linux host to the desired state defined in linux.yaml. Plan
 ```
       --context string   Named context from ~/.linuxctl/config.yaml
       --dry-run          Alias for plan; never mutate
-      --env string       Named env from ~/.linuxctl/envs.yaml
       --format string    table|json|yaml|plain (default "table")
   -h, --help             help for linuxctl
-      --host string      Restrict to a single host from the env
+      --host string      Restrict to a single host from the stack
       --license string   Override ~/.linuxctl/license.jwt
+      --stack string     Named stack from ~/.linuxctl/stacks.yaml
   -v, --verbose          Verbose logging
       --yes              Non-interactive; skip confirm prompts
 ```
@@ -27,7 +27,6 @@ linuxctl converges a Linux host to the desired state defined in linux.yaml. Plan
 * [linuxctl diff](linuxctl_diff.md)	 - Read-only drift report across all managers
 * [linuxctl dir](linuxctl_dir.md)	 - Manage dir state (plan / apply / verify)
 * [linuxctl disk](linuxctl_disk.md)	 - Manage disk state (plan / apply / verify)
-* [linuxctl env](linuxctl_env.md)	 - Manage the local env registry (~/.linuxctl/envs.yaml)
 * [linuxctl firewall](linuxctl_firewall.md)	 - Manage firewall state (plan / apply / verify)
 * [linuxctl hosts](linuxctl_hosts.md)	 - Manage hosts state (plan / apply / verify)
 * [linuxctl license](linuxctl_license.md)	 - Manage the linuxctl license
@@ -38,6 +37,7 @@ linuxctl converges a Linux host to the desired state defined in linux.yaml. Plan
 * [linuxctl selinux](linuxctl_selinux.md)	 - Manage selinux state (plan / apply / verify)
 * [linuxctl service](linuxctl_service.md)	 - Manage service state (plan / apply / verify)
 * [linuxctl ssh](linuxctl_ssh.md)	 - Manage ssh state (authorized_keys, sshd_config, cluster trust)
+* [linuxctl stack](linuxctl_stack.md)	 - Manage the local stack registry (~/.linuxctl/stacks.yaml)
 * [linuxctl sysctl](linuxctl_sysctl.md)	 - Manage sysctl state (plan / apply / verify)
 * [linuxctl user](linuxctl_user.md)	 - Manage user state (plan / apply / verify)
 * [linuxctl version](linuxctl_version.md)	 - Print linuxctl version information

@@ -44,7 +44,7 @@ const (
 // and dispatches.
 func runManager(name string, action mgrAction) func(*cobra.Command, []string) error {
 	return func(_ *cobra.Command, args []string) error {
-		linux, err := loadLinux(envPathFromArgs(args))
+		linux, err := loadLinux(stackPathFromArgs(args))
 		if err != nil {
 			return err
 		}

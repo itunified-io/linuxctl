@@ -7,14 +7,16 @@ enforced by `linuxctl config validate`.
 - `env.yaml` — environment metadata and host inventory.
 - `linux.yaml` — the desired-state manifest; the primary input.
 - `~/.linuxctl/config.yaml` — operator-scoped context settings.
-- `~/.linuxctl/envs.yaml` — registered envs.
+- `~/.linuxctl/stacks.yaml` — registered stacks (legacy `envs.yaml` auto-migrated, see #17).
 
 ---
 
 ## 1. `env.yaml`
 
 Optional top-level metadata for a named environment. Referenced via
-`linuxctl --env <name>` and resolved from `~/.linuxctl/envs.yaml`.
+`linuxctl --stack <name>` and resolved from `~/.linuxctl/stacks.yaml`. The
+file name `env.yaml` and the `kind: Env` YAML tag are retained for
+backward compatibility.
 
 ```yaml
 kind: Env
@@ -291,16 +293,23 @@ current-context: lab
 
 ---
 
-## 6. `~/.linuxctl/envs.yaml`
+## 6. `~/.linuxctl/stacks.yaml`
 
 ```yaml
-envs:
+stacks:
   lab:
     path: /home/op/repos/infrastructure/envs/lab
     default: true
   prod:
     path: /home/op/repos/infrastructure/envs/prod
 ```
+
+> **Deprecation note (#17):** `~/.linuxctl/envs.yaml` is the legacy name
+> and is auto-migrated to `stacks.yaml` on first run. The CLI flag
+> `--env` and env var `LINUXCTL_ENV` remain available as deprecated
+> aliases for `--stack` / `LINUXCTL_STACK`; both emit a deprecation
+> warning and will be removed in the next release. The manifest filename
+> `env.yaml` and the `kind: Env` YAML tag are unchanged.
 
 ---
 

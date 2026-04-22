@@ -4,6 +4,65 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.8 — 2026-04-22
+
+### BREAKING — CLI verb rename `env` → `stack` (#17)
+
+Mirrors the proxctl `env` → `stack` rename. Deprecated aliases are retained
+for one release and emit warnings; they will be removed in the next release.
+
+- **CLI subcommand:** `linuxctl env …` → `linuxctl stack …`. `env` remains
+  as a hidden deprecated alias with a PersistentPreRun stderr warning.
+- **Global flag:** `--env <name>` → `--stack <name>`. `--env` is a hidden
+  deprecated alias (pflag `Deprecated` + `Hidden`).
+- **Registry file:** `~/.linuxctl/envs.yaml` → `~/.linuxctl/stacks.yaml`.
+  Auto-migration on startup: if only `envs.yaml` exists, it is renamed in
+  place; if both exist, `stacks.yaml` wins and a warning is emitted on
+  every run until the user deletes `envs.yaml`.
+- **Environment variable:** `LINUXCTL_ENV` → `LINUXCTL_STACK`. Both
+  accepted during the deprecation window; `LINUXCTL_STACK` wins on
+  conflict. Flags still win over env vars.
+- **Unchanged:** `pkg/config.Env` Go type, `kind: Env` YAML tag, and the
+  manifest filename `env.yaml`. Only the CLI verb, flag, env var, and
+  registry filename moved.
+
+### Added
+
+- `internal/root/stack.go` — `newStackCmd()` + `newEnvAliasCmd()` hidden
+  deprecated alias
+- `internal/root/stacks_registry.go` — `MigrateRegistry()`,
+  `RegistryPathForRead()`, `registryPath()`, `legacyRegistryPath()`
+- `applyEnvVarDefaults()` — honors `LINUXCTL_STACK`/`LINUXCTL_ENV`
+- `stackPathFromArgs()` — canonical flag/env resolver (prefers `--stack`)
+
+### Tests
+
+- `TestStack_AllSubcommandsNotImplemented` + `TestEnv_DeprecatedAlias_StillWorks`
+  + `TestEnv_DeprecatedAlias_EmitsWarning`
+- `TestStackPathFromArgs` — --stack / --env / both / positional / default
+- `TestMigrateRegistry_*` — no-files / legacy-only (renames) / both-exist
+  (keeps both) / legacy-is-dir (no-op) / rename-fails (non-fatal)
+- `TestApplyEnvVarDefaults` — LINUXCTL_STACK / LINUXCTL_ENV / both / flag-wins
+- `TestRegistryHome_UserHomeDirFails` — UserHomeDir injection covers the
+  error-path propagation through all registry helpers
+- Coverage held ≥95% on pkg/config (97.7%), pkg/managers (95.4%),
+  pkg/apply (97.7%), internal/root (95.1%)
+
+### Docs
+
+- `docs/user-guide.md` — "Envs" section → "Stacks"; registry + CLI
+  examples; deprecation callout for `env` / `--env` / `envs.yaml`
+- `docs/config-reference.md` — §6 renamed to `~/.linuxctl/stacks.yaml`;
+  deprecation note covering CLI flag, env var, filename; `env.yaml` +
+  `kind: Env` explicitly retained
+- `docs/quick-start.md` + `docs/installation.md` — "stack registry"
+  wording; `stacks.yaml` volume path note
+- `cmd/docgen/main.go` — conventions footer references `--stack` with
+  `--env` as deprecated alias note
+- `docs/cli/*` — regenerated via `make docs-cli`, 78 pages reflecting
+  `linuxctl stack` tree + `--stack` persistent flag
+- `docs/cli-reference.md` — regenerated index
+
 ## v2026.04.11.7 — 2026-04-22
 
 ### Added — comprehensive documentation (#13)

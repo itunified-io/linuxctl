@@ -1,7 +1,7 @@
 # User Guide
 
 This guide walks through every concept an operator needs to run `linuxctl`
-productively: contexts, envs, sessions, the plan/apply/verify/rollback cycle,
+productively: contexts, stacks, sessions, the plan/apply/verify/rollback cycle,
 the 13 subsystem managers, orchestration, fleet operations, drift detection,
 and built-in presets.
 
@@ -15,7 +15,7 @@ For the per-field YAML schema, see [`config-reference.md`](config-reference.md).
 ### 1.1 Contexts
 
 A **context** is a named bundle of operator-scoped defaults stored in
-`~/.linuxctl/config.yaml`. A context pins a default env, a default output
+`~/.linuxctl/config.yaml`. A context pins a default stack, a default output
 format, a license path, and connection defaults. Switch contexts with:
 
 ```bash
@@ -25,20 +25,26 @@ linuxctl config use-context lab
 Contexts are analogous to `kubectl` contexts: they do not carry desired
 state, only operator ergonomics.
 
-### 1.2 Envs
+### 1.2 Stacks
 
-An **env** maps a logical environment name (`lab`, `uat`, `prod`) to a
+A **stack** maps a logical environment name (`lab`, `uat`, `prod`) to a
 directory that contains at least a `linux.yaml` and optionally an
 `env.yaml` with cluster metadata (roles, domains, tags, per-node
-overrides). Envs are registered in `~/.linuxctl/envs.yaml`:
+overrides). Stacks are registered in `~/.linuxctl/stacks.yaml`:
 
 ```bash
-linuxctl env add lab  --path ~/repos/infrastructure/envs/lab
-linuxctl env add prod --path ~/repos/infrastructure/envs/prod
-linuxctl env list
+linuxctl stack add lab  --path ~/repos/infrastructure/envs/lab
+linuxctl stack add prod --path ~/repos/infrastructure/envs/prod
+linuxctl stack list
 ```
 
-Resolved env paths support relative-path imports via `$ref` composition
+> **Deprecation (#17):** `linuxctl env …` and `--env` remain available for
+> one release as hidden aliases, emitting a deprecation warning. A legacy
+> `~/.linuxctl/envs.yaml` is auto-migrated to `stacks.yaml` on first run.
+> The manifest filename `env.yaml` and the `kind: Env` YAML tag are
+> **unchanged**; only the CLI verb, flag, and registry filename moved.
+
+Resolved stack paths support relative-path imports via `$ref` composition
 (see [`config-reference.md`](config-reference.md)).
 
 ### 1.3 Managers
@@ -100,7 +106,7 @@ manager has an idempotency bug — open an issue with `type:fix`.
 
 ### 2.1 Local session
 
-Used when `--host localhost` (or `--host` omitted and the env declares a
+Used when `--host localhost` (or `--host` omitted and the stack declares a
 single-node `localhost` target). The local session executes commands via
 `exec.Command` directly; no SSH is involved. Ideal for:
 
@@ -126,12 +132,12 @@ overrides.
 
 ---
 
-## 3. Env registry
+## 3. Stack registry
 
-`~/.linuxctl/envs.yaml`:
+`~/.linuxctl/stacks.yaml`:
 
 ```yaml
-envs:
+stacks:
   lab:
     path: /home/op/repos/infrastructure/envs/lab
     default: true
@@ -142,12 +148,12 @@ envs:
 Commands:
 
 ```bash
-linuxctl env add    <name> --path <dir>
-linuxctl env list
-linuxctl env remove <name>
+linuxctl stack add    <name> --path <dir>
+linuxctl stack list
+linuxctl stack remove <name>
 ```
 
-Every env MUST contain a `linux.yaml`. Optional files:
+Every stack MUST contain a `linux.yaml`. Optional files:
 
 - `env.yaml` — cluster metadata: name, domain, tags, per-role selectors,
   inventory source (e.g. Ansible, Terraform output, inline).
@@ -229,7 +235,7 @@ linuxctl apply apply  envs/prod/linux.yaml --all --parallel 4
 linuxctl apply verify envs/prod/linux.yaml --all
 ```
 
-The `--all` flag expands the host list from the env manifest. `--parallel`
+The `--all` flag expands the host list from the stack manifest. `--parallel`
 caps concurrent SSH sessions. Output aggregates per-host results; the exit
 code is the max over all hosts. See [`licensing.md`](licensing.md) for
 tier gating.

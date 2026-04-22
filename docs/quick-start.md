@@ -183,7 +183,7 @@ output suitable for ingestion by mcp-host or any monitoring pipeline.
 
 ## What next?
 
-- [`user-guide.md`](user-guide.md) — concepts, sessions, env registry,
+- [`user-guide.md`](user-guide.md) — concepts, sessions, stack registry,
   orchestrator deep dive, fleet operations.
 - [`manager-reference.md`](manager-reference.md) — every manager, every
   YAML field.

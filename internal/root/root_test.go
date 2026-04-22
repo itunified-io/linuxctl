@@ -44,7 +44,7 @@ func TestRootCmd_HelpLists14Subsystems(t *testing.T) {
 	for _, want := range []string{
 		"disk", "user", "package", "service", "mount", "sysctl",
 		"limits", "firewall", "hosts", "network", "ssh", "selinux", "dir",
-		"apply", "diff", "config", "env", "license", "version",
+		"apply", "diff", "config", "stack", "license", "version",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--help missing subcommand %q", want)
@@ -58,7 +58,7 @@ func TestRootCmd_PersistentFlagsExposed(t *testing.T) {
 		t.Fatalf("help: %v", err)
 	}
 	for _, want := range []string{
-		"--context", "--env", "--host", "--format", "--yes",
+		"--context", "--stack", "--host", "--format", "--yes",
 		"--dry-run", "--license", "--verbose",
 	} {
 		if !strings.Contains(out, want) {
@@ -178,23 +178,50 @@ func TestConfig_Show_NotImplemented(t *testing.T) {
 	}
 }
 
-// ---- env (all stubs) ------------------------------------------------------
+// ---- stack (all stubs, + deprecated env alias) ----------------------------
 
-func TestEnv_AllSubcommandsNotImplemented(t *testing.T) {
+func TestStack_AllSubcommandsNotImplemented(t *testing.T) {
 	cases := [][]string{
-		{"env", "new", "foo"},
-		{"env", "list"},
-		{"env", "use", "foo"},
-		{"env", "current"},
-		{"env", "add", "foo"},
-		{"env", "remove", "foo"},
-		{"env", "show", "foo"},
+		{"stack", "new", "foo"},
+		{"stack", "list"},
+		{"stack", "use", "foo"},
+		{"stack", "current"},
+		{"stack", "add", "foo"},
+		{"stack", "remove", "foo"},
+		{"stack", "show", "foo"},
 	}
 	for _, args := range cases {
 		_, err := executeCmd(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "not implemented") {
 			t.Errorf("%v: expected not implemented, got %v", args, err)
 		}
+	}
+}
+
+// TestEnv_DeprecatedAlias_StillWorks verifies that the `env` subcommand tree
+// remains functional as a hidden deprecated alias for `stack` (#17, one-release
+// backward compatibility window).
+func TestEnv_DeprecatedAlias_StillWorks(t *testing.T) {
+	cases := [][]string{
+		{"env", "list"},
+		{"env", "current"},
+		{"env", "new", "foo"},
+	}
+	for _, args := range cases {
+		_, err := executeCmd(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "not implemented") {
+			t.Errorf("%v: expected not implemented (stub), got %v", args, err)
+		}
+	}
+}
+
+// TestEnv_DeprecatedAlias_EmitsWarning verifies that invoking `env` prints a
+// deprecation notice on stderr (Cobra emits this automatically for commands
+// with Deprecated set).
+func TestEnv_DeprecatedAlias_EmitsWarning(t *testing.T) {
+	out, _ := executeCmd(t, "env", "list")
+	if !strings.Contains(out, "deprecated") {
+		t.Errorf("expected deprecation warning in output, got: %s", out)
 	}
 }
 
@@ -786,22 +813,48 @@ func TestDiff_BadManifest(t *testing.T) {
 
 // ---- runtime.go helpers (direct) -----------------------------------------
 
-func TestEnvPathFromArgs(t *testing.T) {
+func TestStackPathFromArgs(t *testing.T) {
+	gf = globalFlags{}
+	if got := stackPathFromArgs([]string{"foo.yaml"}); got != "foo.yaml" {
+		t.Errorf("positional: got %q", got)
+	}
+	// --stack flag (canonical)
+	gf = globalFlags{stack: "stack-flag.yaml"}
+	if got := stackPathFromArgs(nil); got != "stack-flag.yaml" {
+		t.Errorf("--stack flag: got %q", got)
+	}
+	// --env deprecated alias: still honored, emits warning
+	gf = globalFlags{env: "env-flag.yaml"}
+	if got := stackPathFromArgs(nil); got != "env-flag.yaml" {
+		t.Errorf("--env alias: got %q", got)
+	}
+	// Both set: --stack wins
+	gf = globalFlags{stack: "stack-wins.yaml", env: "env-loses.yaml"}
+	if got := stackPathFromArgs(nil); got != "stack-wins.yaml" {
+		t.Errorf("--stack+--env: got %q", got)
+	}
+	// Default
+	gf = globalFlags{}
+	if got := stackPathFromArgs(nil); got != "env.yaml" {
+		t.Errorf("default: got %q", got)
+	}
+	if got := stackPathFromArgs([]string{""}); got != "env.yaml" {
+		t.Errorf("empty positional: got %q", got)
+	}
+}
+
+// TestEnvPathFromArgs_ShimStillWorks verifies the deprecated envPathFromArgs
+// shim forwards to stackPathFromArgs (#17 backward-compat window).
+func TestEnvPathFromArgs_ShimStillWorks(t *testing.T) {
 	gf = globalFlags{}
 	if got := envPathFromArgs([]string{"foo.yaml"}); got != "foo.yaml" {
-		t.Errorf("positional: got %q", got)
+		t.Errorf("shim positional: got %q", got)
 	}
 	gf.env = "flag.yaml"
 	if got := envPathFromArgs(nil); got != "flag.yaml" {
-		t.Errorf("flag: got %q", got)
+		t.Errorf("shim flag: got %q", got)
 	}
 	gf = globalFlags{}
-	if got := envPathFromArgs(nil); got != "env.yaml" {
-		t.Errorf("default: got %q", got)
-	}
-	if got := envPathFromArgs([]string{""}); got != "env.yaml" {
-		t.Errorf("empty positional: got %q", got)
-	}
 }
 
 func TestOpenSessionReal(t *testing.T) {
