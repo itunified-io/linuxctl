@@ -1,0 +1,13 @@
+version: "1"
+kind: Env
+metadata:
+  name: child
+  tags:
+    env: uat
+extends: ./base-env.yaml
+spec:
+  linux:
+    $ref: ./linux.yaml
+  networks:
+    mgmt:
+      cidr: 10.0.0.0/24

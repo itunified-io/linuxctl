@@ -1,0 +1,11 @@
+version: "1"
+kind: Env
+metadata:
+  name: base
+  tags:
+    role: base
+spec:
+  linux:
+    $ref: ./linux.yaml
+  hypervisor:
+    kind: proxmox

@@ -1,0 +1,36 @@
+kind: Linux
+apiVersion: v1
+directories:
+  - path: /opt/oracle
+    owner: oracle
+    group: oinstall
+    mode: "0755"
+  - path: /u01/app
+    owner: oracle
+    group: oinstall
+    mode: "0775"
+users_groups:
+  groups:
+    - name: oinstall
+      gid: 1100
+    - name: dba
+      gid: 1101
+  users:
+    - name: oracle
+      uid: 1100
+      gid: oinstall
+      groups: [dba]
+      shell: /bin/bash
+mounts:
+  - type: nfs
+    source: nas:/export/backup
+    mount_point: /mnt/backup
+    options: [rw, hard]
+    persistent: true
+hosts_entries:
+  - ip: 10.0.0.10
+    names: [db01, db01.local]
+services:
+  - name: chronyd
+    enabled: true
+    state: running
