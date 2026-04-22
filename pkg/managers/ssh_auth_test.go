@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
 )
@@ -277,21 +279,26 @@ func TestRenderSSHDDropIn_Deterministic(t *testing.T) {
 
 func TestSetupClusterSSH(t *testing.T) {
 	n1 := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
 		on("id_ed25519.pub", "ssh-ed25519 NODE1 grid@n1\n", nil)
 	n2 := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
 		on("id_ed25519.pub", "ssh-ed25519 NODE2 grid@n2\n", nil)
 
 	sessions := map[string]SessionRunner{"n1.example": n1, "n2.example": n2}
-	if err := SetupClusterSSH(context.Background(), sessions, []string{"grid"}); err != nil {
+	res, err := SetupClusterSSH(context.Background(), sessions, []string{"grid"})
+	if err != nil {
 		t.Fatalf("SetupClusterSSH: %v", err)
 	}
-	// Both nodes should have run keygen + auth + keyscan.
+	if res == nil || len(res.PerNode) != 2 {
+		t.Fatalf("expected 2 nodes in result, got %+v", res)
+	}
 	for _, s := range []*mockSession{n1, n2} {
 		if !s.ranContaining("ssh-keygen") {
 			t.Error("expected ssh-keygen")
 		}
 		if !s.ranContaining("authorized_keys") {
-			t.Error("expected authorized_keys append")
+			t.Error("expected authorized_keys install")
 		}
 		if !s.ranContaining("ssh-keyscan") {
 			t.Error("expected ssh-keyscan")
@@ -300,17 +307,302 @@ func TestSetupClusterSSH(t *testing.T) {
 }
 
 func TestSetupClusterSSH_NoSessions(t *testing.T) {
-	if err := SetupClusterSSH(context.Background(), nil, []string{"grid"}); err == nil {
+	if _, err := SetupClusterSSH(context.Background(), nil, []string{"grid"}); err == nil {
 		t.Error("expected error with no sessions")
 	}
 }
 
 func TestSetupClusterSSH_NoUsers(t *testing.T) {
 	ms := newMockSession()
-	if err := SetupClusterSSH(context.Background(),
+	if _, err := SetupClusterSSH(context.Background(),
 		map[string]SessionRunner{"n1": ms}, nil); err == nil {
 		t.Error("expected error with no users")
 	}
+}
+
+func TestSetupClusterSSH_TwoNodes_CrossAuth(t *testing.T) {
+	// Each node returns its own unique pubkey. After exchange, each node's
+	// authorized_keys write should include BOTH pubkeys.
+	n1 := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
+		on("id_ed25519.pub", "ssh-ed25519 AAA grid@n1\n", nil)
+	n2 := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
+		on("id_ed25519.pub", "ssh-ed25519 BBB grid@n2\n", nil)
+
+	sessions := map[string]SessionRunner{"n1": n1, "n2": n2}
+	res, err := SetupClusterSSH(context.Background(), sessions, []string{"grid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each node's authorized_keys merge must reference BOTH pubkeys.
+	for name, s := range map[string]*mockSession{"n1": n1, "n2": n2} {
+		var foundA, foundB bool
+		for _, c := range s.cmds {
+			if strings.Contains(c, "authorized_keys") && strings.Contains(c, "AAA") {
+				foundA = true
+			}
+			if strings.Contains(c, "authorized_keys") && strings.Contains(c, "BBB") {
+				foundB = true
+			}
+		}
+		if !foundA || !foundB {
+			t.Errorf("%s: expected both pubkeys in authorized_keys write (A=%v B=%v)", name, foundA, foundB)
+		}
+	}
+	if got := res.PerNode["n1"].AuthorizedKeys["grid"]; got < 2 {
+		t.Errorf("n1.AuthorizedKeys[grid]=%d, want >=2", got)
+	}
+}
+
+func TestSetupClusterSSH_KeyAlreadyExists(t *testing.T) {
+	// Probe returns __EXISTS__ → no ssh-keygen invocation, GeneratedKeys stays empty.
+	n1 := newMockSession().
+		on("__EXISTS__", "__EXISTS__\n", nil).
+		on("id_ed25519.pub", "ssh-ed25519 CACHED grid@n1\n", nil)
+	res, err := SetupClusterSSH(context.Background(),
+		map[string]SessionRunner{"n1": n1}, []string{"grid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range n1.cmds {
+		if strings.Contains(c, "ssh-keygen -t ed25519") {
+			t.Errorf("did not expect keygen when key exists; ran: %s", c)
+		}
+	}
+	if len(res.PerNode["n1"].GeneratedKeys) != 0 {
+		t.Errorf("GeneratedKeys should be empty when key pre-existed: %+v", res.PerNode["n1"].GeneratedKeys)
+	}
+}
+
+// failOnceSession returns an error on the first probe, then behaves normally.
+type failOnceSession struct {
+	*mockSession
+	failKey string
+	failed  bool
+}
+
+func (f *failOnceSession) Run(ctx context.Context, cmd string) (string, string, error) {
+	if !f.failed && strings.Contains(cmd, f.failKey) {
+		f.failed = true
+		return "", "pipe closed", fmt.Errorf("session died")
+	}
+	return f.mockSession.Run(ctx, cmd)
+}
+
+func TestSetupClusterSSH_PartialFailure(t *testing.T) {
+	// n1 dies on probe; n2 succeeds.
+	bad := &failOnceSession{
+		mockSession: newMockSession().
+			on("__MISSING__", "__MISSING__\n", nil).
+			on("id_ed25519.pub", "", nil),
+		failKey: "test -f",
+	}
+	good := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
+		on("id_ed25519.pub", "ssh-ed25519 OK grid@n2\n", nil)
+
+	res, err := SetupClusterSSH(context.Background(),
+		map[string]SessionRunner{"n1": bad, "n2": good}, []string{"grid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) == 0 {
+		t.Fatal("expected at least one error")
+	}
+	// n2 must still have gone through authorized_keys merge.
+	if !good.ranContaining("authorized_keys") {
+		t.Error("expected n2 to complete despite n1 failure")
+	}
+}
+
+func TestSetupClusterSSH_Concurrent(t *testing.T) {
+	// Per-node phase-1 runs in parallel — assert by counting overlapping
+	// inflight goroutines on each node's Run() via a shared barrier.
+	var inflight, peak int64
+	var barMu sync.Mutex
+	mk := func(pub string) SessionRunner {
+		return &barrierSession{
+			mockSession: newMockSession().
+				on("__MISSING__", "__MISSING__\n", nil).
+				on("id_ed25519.pub", pub, nil),
+			inflight: &inflight,
+			peak:     &peak,
+			mu:       &barMu,
+		}
+	}
+	sessions := map[string]SessionRunner{
+		"n1": mk("ssh-ed25519 A grid@n1\n"),
+		"n2": mk("ssh-ed25519 B grid@n2\n"),
+		"n3": mk("ssh-ed25519 C grid@n3\n"),
+	}
+	if _, err := SetupClusterSSH(context.Background(), sessions, []string{"grid"}); err != nil {
+		t.Fatal(err)
+	}
+	barMu.Lock()
+	observed := peak
+	barMu.Unlock()
+	if observed < 2 {
+		t.Errorf("expected parallel execution (peak>=2), got peak=%d", observed)
+	}
+}
+
+func TestSeedKnownHosts_FullPath(t *testing.T) {
+	// Mock returns real keyscan output on the scan command, an existing entry
+	// on the known_hosts read (so merge dedup path is exercised), and no error
+	// on the write.
+	ms := newMockSession().
+		on("ssh-keyscan -t ed25519", "peer1 ssh-ed25519 AAA\npeer2 ssh-ed25519 BBB\npeer1 ssh-ed25519 AAA\n\n", nil).
+		on("known_hosts", "peer1 ssh-ed25519 AAA\n", nil) // used for both cat + write paths; write ignores stdout
+	n, err := seedKnownHosts(context.Background(), ms, []string{"grid"}, []string{"peer1", "peer2"})
+	if err != nil {
+		t.Fatalf("seedKnownHosts: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 unique peer entries, got %d", n)
+	}
+	// Must have run a write command.
+	if !ms.ranContaining("known_hosts") || !ms.ranContaining("chmod 0644") {
+		t.Errorf("expected known_hosts write + chmod; cmds=%v", ms.cmds)
+	}
+}
+
+func TestSeedKnownHosts_NoPeers(t *testing.T) {
+	ms := newMockSession()
+	n, err := seedKnownHosts(context.Background(), ms, []string{"grid"}, nil)
+	if err != nil || n != 0 {
+		t.Errorf("want 0,nil; got %d,%v", n, err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("no peers → no commands; got %v", ms.cmds)
+	}
+}
+
+func TestSeedKnownHosts_ScanError(t *testing.T) {
+	ms := newMockSession().on("ssh-keyscan -t ed25519", "", fmt.Errorf("no route"))
+	_, err := seedKnownHosts(context.Background(), ms, []string{"grid"}, []string{"p1"})
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestSeedKnownHosts_WriteError(t *testing.T) {
+	// scan returns entries, but the tee/install write fails.
+	// Order: ssh-keyscan first, install -d next (write-only), cat as fallthrough.
+	ms := newMockSession().
+		on("ssh-keyscan -t ed25519", "p1 ssh-ed25519 AAA\n", nil).
+		on("install -d", "", fmt.Errorf("disk full")).
+		on("cat ", "", nil)
+	_, err := seedKnownHosts(context.Background(), ms, []string{"grid"}, []string{"p1"})
+	if err == nil || !strings.Contains(err.Error(), "write known_hosts") {
+		t.Errorf("expected write err, got %v", err)
+	}
+}
+
+func TestMergeAuthorizedKeys_DedupAndMerge(t *testing.T) {
+	// Existing authorized_keys already has KEY1. Bundle also includes KEY1
+	// (de-dup) + a new KEY2.
+	ms := newMockSession().
+		on("authorized_keys", "ssh-ed25519 KEY1 existing\n# comment ignored\nssh-ed25519 KEY1 existing\n", nil)
+	n, err := mergeAuthorizedKeys(context.Background(), ms, "grid",
+		[]string{"ssh-ed25519 KEY1 existing", "ssh-ed25519 KEY2 new", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 unique keys, got %d", n)
+	}
+}
+
+func TestMergeAuthorizedKeys_ReadError(t *testing.T) {
+	ms := newMockSession().on("cat ", "", fmt.Errorf("boom"))
+	_, err := mergeAuthorizedKeys(context.Background(), ms, "grid", nil)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestMergeAuthorizedKeys_WriteError(t *testing.T) {
+	// Order matters: the mock picks the first matching key. "install -d" only
+	// appears in the write, not the read, so it selectively fails writes.
+	ms := newMockSession().
+		on("install -d", "", fmt.Errorf("ro fs")).
+		on("cat ", "", nil)
+	_, err := mergeAuthorizedKeys(context.Background(), ms, "grid",
+		[]string{"ssh-ed25519 K x"})
+	if err == nil {
+		t.Error("expected write error")
+	}
+}
+
+func TestEnsureKeypair_Root(t *testing.T) {
+	// Root home branch. Match pub read before the generic probe key so it wins.
+	ms := newMockSession().
+		on("id_ed25519.pub", "ssh-ed25519 ROOTKEY root@host\n", nil).
+		on("__MISSING__", "__MISSING__\n", nil)
+	pub, _, err := ensureKeypair(context.Background(), ms, "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pub, "ROOTKEY") {
+		t.Errorf("pub = %q", pub)
+	}
+	// Also assert we used /root/... path not /home/root/...
+	if !ms.ranContaining("/root/.ssh/id_ed25519") {
+		t.Errorf("expected /root/... path; cmds=%v", ms.cmds)
+	}
+}
+
+func TestEnsureKeypair_ProbeError(t *testing.T) {
+	ms := newMockSession().on("test -f", "", fmt.Errorf("ssh closed"))
+	_, _, err := ensureKeypair(context.Background(), ms, "grid")
+	if err == nil {
+		t.Error("expected probe error")
+	}
+}
+
+func TestEnsureKeypair_KeygenError(t *testing.T) {
+	ms := newMockSession().
+		on("__MISSING__", "__MISSING__\n", nil).
+		on("ssh-keygen -t ed25519", "", fmt.Errorf("keygen broke"))
+	_, _, err := ensureKeypair(context.Background(), ms, "grid")
+	if err == nil || !strings.Contains(err.Error(), "keygen") {
+		t.Errorf("expected keygen err, got %v", err)
+	}
+}
+
+func TestEnsureKeypair_ReadPubError(t *testing.T) {
+	ms := newMockSession().
+		on("__EXISTS__", "__EXISTS__\n", nil).
+		on("cat ", "", fmt.Errorf("no such file"))
+	_, _, err := ensureKeypair(context.Background(), ms, "grid")
+	if err == nil || !strings.Contains(err.Error(), "read pub") {
+		t.Errorf("expected read-pub err, got %v", err)
+	}
+}
+
+type barrierSession struct {
+	*mockSession
+	inflight *int64
+	peak     *int64
+	mu       *sync.Mutex
+}
+
+func (b *barrierSession) Run(ctx context.Context, cmd string) (string, string, error) {
+	// Only measure during phase-1 (probe / pub read). Phase-2 is serialised.
+	if strings.Contains(cmd, "test -f") || strings.Contains(cmd, "id_ed25519.pub") || strings.Contains(cmd, "ssh-keygen -t ed25519") {
+		b.mu.Lock()
+		*b.inflight++
+		if *b.inflight > *b.peak {
+			*b.peak = *b.inflight
+		}
+		b.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		b.mu.Lock()
+		*b.inflight--
+		b.mu.Unlock()
+	}
+	return b.mockSession.Run(ctx, cmd)
 }
 
 func TestSSHManager_Rollback_NoSession(t *testing.T) {
