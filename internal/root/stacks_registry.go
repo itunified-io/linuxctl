@@ -16,13 +16,17 @@ var (
 	envsYAMLName   = "envs.yaml" // deprecated alias; remove next release
 )
 
+// userHomeDir is a package-level indirection over os.UserHomeDir so tests can
+// inject failure modes (the real function almost never fails in practice).
+var userHomeDir = os.UserHomeDir
+
 // registryHome returns the per-user linuxctl config directory
 // (~/.linuxctl). Honors the LINUXCTL_HOME env var for testing.
 func registryHome() (string, error) {
 	if p := os.Getenv("LINUXCTL_HOME"); p != "" {
 		return p, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home: %w", err)
 	}
