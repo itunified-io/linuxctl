@@ -341,6 +341,71 @@ func TestBundleExpand_NotABundle(t *testing.T) {
 	}
 }
 
+func TestSpecDecoders(t *testing.T) {
+	// Directories
+	p, err := ResolveCategory("directories", "oracle-ofa-19c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := DirectoriesSpec(p)
+	if err != nil || len(dirs) == 0 {
+		t.Errorf("DirectoriesSpec: %v len=%d", err, len(dirs))
+	}
+
+	// UsersGroups
+	p, _ = ResolveCategory("users_groups", "oracle-rac", nil)
+	ug, err := UsersGroupsSpec(p)
+	if err != nil || ug == nil || len(ug.Groups) == 0 {
+		t.Errorf("UsersGroupsSpec failed: err=%v ug=%+v", err, ug)
+	}
+
+	// Packages
+	p, _ = ResolveCategory("packages", "oracle-19c", nil)
+	pp, err := PackagesSpec(p)
+	if err != nil || pp == nil || len(pp.Install) == 0 {
+		t.Errorf("PackagesSpec failed: err=%v pp=%+v", err, pp)
+	}
+}
+
+func TestResolveCategory_NotFound(t *testing.T) {
+	if _, err := ResolveCategory("bundles", "nope-xx", nil); err == nil {
+		t.Error("expected error")
+	}
+	if _, err := ResolveCategory("", "", nil); err == nil {
+		t.Error("empty name should error")
+	}
+}
+
+func TestList_BusinessTierIncludesCommunity(t *testing.T) {
+	// All shipped presets are community tier — business tier should see the
+	// same count (or more in the future).
+	c := List(func() Tier { return TierCommunity })
+	b := List(func() Tier { return TierBusiness })
+	if len(b) < len(c) {
+		t.Errorf("business should see >= community count (c=%d b=%d)", len(c), len(b))
+	}
+}
+
+func TestMergeLimits_FullSort(t *testing.T) {
+	entries := []config.LimitEntry{
+		{User: "b", Type: "hard", Item: "nofile", Value: "2"},
+		{User: "a", Type: "soft", Item: "nproc", Value: "1"},
+		{User: "a", Type: "hard", Item: "nofile", Value: "1"},
+		{User: "a", Type: "soft", Item: "nofile", Value: "1"},
+	}
+	out := MergeLimits(entries, nil)
+	if len(out) != 4 {
+		t.Fatalf("want 4, got %d", len(out))
+	}
+	// a/hard/nofile, a/soft/nofile, a/soft/nproc, b/hard/nofile
+	if out[0].User != "a" || out[0].Type != "hard" {
+		t.Errorf("bad order: %+v", out)
+	}
+	if out[3].User != "b" {
+		t.Errorf("bad order: %+v", out)
+	}
+}
+
 func containsStr(s []string, x string) bool {
 	for _, v := range s {
 		if v == x {

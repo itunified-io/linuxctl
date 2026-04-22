@@ -157,10 +157,31 @@ func TestConfig_Validate_BadYAML(t *testing.T) {
 	}
 }
 
-func TestConfig_Render_NotImplemented(t *testing.T) {
-	_, err := executeCmd(t, "config", "render", "/tmp/x.yaml")
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("render err = %v", err)
+func TestConfig_Render_ImplementedErrorsOnMissingFile(t *testing.T) {
+	// Plan 033: config render is now implemented. A missing file path must
+	// surface a read error, not "not implemented".
+	_, err := executeCmd(t, "config", "render", "/tmp/does-not-exist-xx-linuxctl.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("render should be implemented; err = %v", err)
+	}
+}
+
+func TestConfig_Render_ExpandsBundlePreset(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "linux.yaml")
+	content := []byte("kind: Linux\nbundle_preset: minimal-host\n")
+	if err := os.WriteFile(p, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := executeCmd(t, "config", "render", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "cifs-utils") {
+		t.Errorf("render output should expand bundle to include cifs-utils; got:\n%s", out)
 	}
 }
 

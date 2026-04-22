@@ -120,6 +120,9 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	cmd.AddCommand(newApplyCmd())
 	cmd.AddCommand(newDiffCmd())
 
+	// Conventions library (plan 033).
+	cmd.AddCommand(newPresetCmd())
+
 	// Meta.
 	cmd.AddCommand(newLicenseCmd())
 	cmd.AddCommand(newVersionCmd(info))
