@@ -4,6 +4,28 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.5 — 2026-04-19
+
+### Tests — final coverage push (#7)
+
+| Package | Before | After |
+|---------|--------|-------|
+| pkg/license | 80.0% | **100.0%** |
+| internal/root | 38.0% | **98.1%** |
+| **Total** | 87.5% | **95.1%** |
+
+- 81 new tests (11 license + 70 CLI handler)
+- Minor refactor: `openSession` → package-level var for SSH DI (test fakes swap in)
+- Cobra test harness with fresh `NewRootCmd` per test; fake manager registered for orchestrator tests; full apply DAG traversal without real infrastructure
+- All 7 env subcommands + 7×3 subsystem stubs + config/license/ssh stub branches covered
+
+### Bugs flagged (follow-up #8)
+
+- `runManager` config.UsersGroups/Packages type mismatch with managers.*Spec — runtime "unsupported desired-state type"
+- `apply.go:75` nil-deref on `r.Applied` when orchestrator returns nil on error path
+
+Both documented with repro tests; fix deferred to #8.
+
 ## v2026.04.11.4 — 2026-04-19
 
 ### Tests — coverage hardening to ≥95% (#5)
