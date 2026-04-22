@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
 )
@@ -300,20 +301,41 @@ func (m *SSHAuthManager) readSSHDDropIn(ctx context.Context) (map[string]string,
 	return out, nil
 }
 
-// ---- Cluster SSH setup (Phase 4 scaffold) --------------------------------
+// ---- Cluster SSH setup ---------------------------------------------------
 
-// SetupClusterSSH generates per-user SSH keypairs on each node, collects the
-// public keys, and cross-authorizes them so the given users have passwordless
-// ssh trust between all nodes. It also seeds known_hosts via ssh-keyscan.
+// ClusterSSHResult summarises what SetupClusterSSH did per node, plus any
+// errors that were captured without aborting the run.
+type ClusterSSHResult struct {
+	PerNode map[string]*NodeSSHResult
+	Errors  []error
+}
+
+// NodeSSHResult is a per-host summary. All maps are keyed by service-account
+// username (e.g. "grid", "oracle").
+type NodeSSHResult struct {
+	Hostname       string
+	GeneratedKeys  map[string]string // user → key fingerprint (may be empty on existing keys)
+	AuthorizedKeys map[string]int    // user → count of keys installed
+	KnownHosts     int               // count of scanned known_hosts entries
+}
+
+// SetupClusterSSH generates Ed25519 keypairs for each (node, user) pair,
+// cross-authorizes the collected public keys, and seeds per-user known_hosts
+// via ssh-keyscan. Idempotent: re-running yields no drift.
 //
-// sessions is keyed by a stable node identifier (e.g. FQDN). users is the list
-// of service accounts needing cluster trust (e.g. "grid", "oracle").
-func SetupClusterSSH(ctx context.Context, sessions map[string]SessionRunner, users []string) error {
+// Phase 1 (parallel per node): ensure ~user/.ssh/id_ed25519 exists, read
+// pubkey. Phase 2 (serialised): merge collected pubkeys into each node's
+// authorized_keys + seed known_hosts for every peer.
+//
+// Per-node failures are accumulated in Result.Errors rather than aborting the
+// whole run — the rest of the cluster may still get partial setup, which is
+// more useful than a half-broken RAC bootstrap with no visibility.
+func SetupClusterSSH(ctx context.Context, sessions map[string]SessionRunner, users []string) (*ClusterSSHResult, error) {
 	if len(sessions) == 0 {
-		return fmt.Errorf("SetupClusterSSH: no sessions provided")
+		return nil, fmt.Errorf("SetupClusterSSH: no sessions provided")
 	}
 	if len(users) == 0 {
-		return fmt.Errorf("SetupClusterSSH: no users provided")
+		return nil, fmt.Errorf("SetupClusterSSH: no users provided")
 	}
 
 	nodes := make([]string, 0, len(sessions))
@@ -322,68 +344,267 @@ func SetupClusterSSH(ctx context.Context, sessions map[string]SessionRunner, use
 	}
 	sort.Strings(nodes)
 
-	pubs := map[string][]string{}
-	for _, user := range users {
-		for _, node := range nodes {
-			sess := sessions[node]
-			home := "/home/" + user
-			if user == "root" {
-				home = "/root"
-			}
-			keygen := fmt.Sprintf(
-				"test -f %[1]s/.ssh/id_ed25519 || "+
-					"(install -d -m 0700 -o %[2]s -g %[2]s %[1]s/.ssh && "+
-					"su - %[2]s -c \"ssh-keygen -t ed25519 -N '' -f %[1]s/.ssh/id_ed25519 -q\")",
-				shellQuote(home), shellQuote(user),
-			)
-			if _, _, err := sess.Run(ctx, keygen); err != nil {
-				return fmt.Errorf("SetupClusterSSH: keygen %s@%s: %w", user, node, err)
-			}
-			pub, _, err := sess.Run(ctx, "cat "+shellQuote(home+"/.ssh/id_ed25519.pub"))
-			if err != nil {
-				return fmt.Errorf("SetupClusterSSH: read pub %s@%s: %w", user, node, err)
-			}
-			pub = strings.TrimSpace(pub)
-			if pub != "" {
-				pubs[user] = append(pubs[user], pub)
-			}
+	res := &ClusterSSHResult{PerNode: make(map[string]*NodeSSHResult, len(nodes))}
+	for _, n := range nodes {
+		res.PerNode[n] = &NodeSSHResult{
+			Hostname:       n,
+			GeneratedKeys:  map[string]string{},
+			AuthorizedKeys: map[string]int{},
 		}
 	}
 
-	for _, user := range users {
-		bundle := strings.Join(pubs[user], "\n") + "\n"
-		for _, node := range nodes {
-			sess := sessions[node]
-			home := "/home/" + user
-			if user == "root" {
-				home = "/root"
-			}
-			auth := fmt.Sprintf(
-				"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
-					"printf %%s %[3]s >> %[2]s/.ssh/authorized_keys && "+
-					"chown %[1]s:%[1]s %[2]s/.ssh/authorized_keys && "+
-					"chmod 0600 %[2]s/.ssh/authorized_keys",
-				shellQuote(user), shellQuote(home), shellQuote(bundle),
-			)
-			if _, _, err := sess.Run(ctx, auth); err != nil {
-				return fmt.Errorf("SetupClusterSSH: auth %s@%s: %w", user, node, err)
-			}
-			for _, other := range nodes {
-				if other == node {
+	// ---- Phase 1: parallel key generation + pubkey read ------------------
+	type phase1Out struct {
+		node    string
+		pubs    map[string]string // user → pubkey line
+		errs    []error
+	}
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		out = make([]phase1Out, 0, len(nodes))
+	)
+	for _, node := range nodes {
+		wg.Add(1)
+		go func(node string, sess SessionRunner) {
+			defer wg.Done()
+			p := phase1Out{node: node, pubs: map[string]string{}}
+			for _, user := range users {
+				pub, fp, err := ensureKeypair(ctx, sess, user)
+				if err != nil {
+					p.errs = append(p.errs, fmt.Errorf("%s@%s: %w", user, node, err))
 					continue
 				}
-				scan := fmt.Sprintf(
-					"su - %[1]s -c \"ssh-keyscan -t ed25519 %[2]s >> %[3]s/.ssh/known_hosts 2>/dev/null\" && "+
-						"chmod 0644 %[3]s/.ssh/known_hosts",
-					shellQuote(user), shellQuote(other), shellQuote(home),
-				)
-				if _, _, err := sess.Run(ctx, scan); err != nil {
-					return fmt.Errorf("SetupClusterSSH: keyscan %s->%s as %s: %w", node, other, user, err)
+				if pub != "" {
+					p.pubs[user] = pub
+				}
+				// The fingerprint is blank when the key already existed and we
+				// don't re-read it; that's fine — GeneratedKeys only records
+				// freshly-minted keys.
+				if fp != "" {
+					mu.Lock()
+					res.PerNode[node].GeneratedKeys[user] = fp
+					mu.Unlock()
 				}
 			}
+			mu.Lock()
+			out = append(out, p)
+			mu.Unlock()
+		}(node, sessions[node])
+	}
+	wg.Wait()
+
+	// Sort phase1 output deterministically so downstream merge order is stable.
+	sort.Slice(out, func(i, j int) bool { return out[i].node < out[j].node })
+
+	// Aggregate pubs per user across the cluster.
+	pubsByUser := map[string][]string{}
+	for _, p := range out {
+		if len(p.errs) > 0 {
+			res.Errors = append(res.Errors, p.errs...)
+		}
+		for u, k := range p.pubs {
+			pubsByUser[u] = append(pubsByUser[u], k)
 		}
 	}
-	return nil
+
+	// ---- Phase 2: serialised authorized_keys + known_hosts merge ---------
+	for _, node := range nodes {
+		sess := sessions[node]
+		nr := res.PerNode[node]
+		for _, user := range users {
+			count, err := mergeAuthorizedKeys(ctx, sess, user, pubsByUser[user])
+			if err != nil {
+				res.Errors = append(res.Errors, fmt.Errorf("auth %s@%s: %w", user, node, err))
+				continue
+			}
+			nr.AuthorizedKeys[user] = count
+		}
+		peers := make([]string, 0, len(nodes)-1)
+		for _, other := range nodes {
+			if other != node {
+				peers = append(peers, other)
+			}
+		}
+		n, err := seedKnownHosts(ctx, sess, users, peers)
+		if err != nil {
+			res.Errors = append(res.Errors, fmt.Errorf("keyscan on %s: %w", node, err))
+		}
+		nr.KnownHosts = n
+	}
+
+	return res, nil
+}
+
+// ensureKeypair creates ~user/.ssh/id_ed25519 if missing and returns the
+// public key string. The second return is the key fingerprint if the key was
+// freshly generated, empty if it already existed (idempotency signal).
+func ensureKeypair(ctx context.Context, sess SessionRunner, user string) (pubkey, fingerprint string, err error) {
+	home := userHome(user)
+	keyPath := home + "/.ssh/id_ed25519"
+	pubPath := keyPath + ".pub"
+
+	// Idempotency probe. We use a deterministic string the script echoes to
+	// tell us whether the key already existed.
+	probe := fmt.Sprintf("test -f %s && echo __EXISTS__ || echo __MISSING__",
+		shellQuote(keyPath))
+	stdout, _, err := sess.Run(ctx, probe)
+	if err != nil {
+		return "", "", fmt.Errorf("probe: %w", err)
+	}
+	exists := strings.Contains(stdout, "__EXISTS__")
+	if !exists {
+		gen := fmt.Sprintf(
+			"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+				"ssh-keygen -t ed25519 -N '' -f %[3]s -q && "+
+				"chown %[1]s:%[1]s %[3]s %[3]s.pub && "+
+				"chmod 0600 %[3]s && chmod 0644 %[3]s.pub",
+			shellQuote(user), shellQuote(home), shellQuote(keyPath),
+		)
+		if _, _, err := sess.Run(ctx, gen); err != nil {
+			return "", "", fmt.Errorf("keygen: %w", err)
+		}
+		fpOut, _, err := sess.Run(ctx, "ssh-keygen -lf "+shellQuote(pubPath))
+		if err == nil {
+			fingerprint = strings.TrimSpace(fpOut)
+		}
+	}
+	pub, _, err := sess.Run(ctx, "cat "+shellQuote(pubPath))
+	if err != nil {
+		return "", fingerprint, fmt.Errorf("read pub: %w", err)
+	}
+	return strings.TrimSpace(pub), fingerprint, nil
+}
+
+// mergeAuthorizedKeys reads ~user/.ssh/authorized_keys, de-dups against the
+// provided bundle (by full line match), writes back with 0600 / user:user.
+// Returns the total count of keys present after the merge.
+func mergeAuthorizedKeys(ctx context.Context, sess SessionRunner, user string, pubs []string) (int, error) {
+	home := userHome(user)
+	path := home + "/.ssh/authorized_keys"
+
+	curOut, _, err := sess.Run(ctx, "cat "+shellQuote(path)+" 2>/dev/null || true")
+	if err != nil {
+		return 0, fmt.Errorf("read: %w", err)
+	}
+	seen := map[string]struct{}{}
+	var merged []string
+	for _, ln := range strings.Split(curOut, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		if _, ok := seen[ln]; ok {
+			continue
+		}
+		seen[ln] = struct{}{}
+		merged = append(merged, ln)
+	}
+	for _, p := range pubs {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		merged = append(merged, p)
+	}
+	content := strings.Join(merged, "\n") + "\n"
+	write := fmt.Sprintf(
+		"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+			"umask 077 && printf %%s %[3]s | tee %[4]s >/dev/null && "+
+			"chown %[1]s:%[1]s %[4]s && chmod 0600 %[4]s",
+		shellQuote(user), shellQuote(home), shellQuote(content), shellQuote(path),
+	)
+	if _, _, err := sess.Run(ctx, write); err != nil {
+		return 0, fmt.Errorf("write: %w", err)
+	}
+	return len(merged), nil
+}
+
+// seedKnownHosts scans each peer via ssh-keyscan and appends (de-duped) into
+// every target user's ~/.ssh/known_hosts. Returns the number of unique peer
+// entries installed.
+func seedKnownHosts(ctx context.Context, sess SessionRunner, users, peers []string) (int, error) {
+	if len(peers) == 0 {
+		return 0, nil
+	}
+	// Do a single ssh-keyscan for all peers, then fan the output out per-user.
+	scanCmd := "ssh-keyscan -t ed25519 " + strings.Join(shellQuoteEach(peers), " ") + " 2>/dev/null"
+	scan, _, err := sess.Run(ctx, scanCmd)
+	if err != nil {
+		return 0, fmt.Errorf("ssh-keyscan: %w", err)
+	}
+	scan = strings.TrimSpace(scan)
+	if scan == "" {
+		return 0, nil
+	}
+	lines := strings.Split(scan, "\n")
+	seen := map[string]struct{}{}
+	uniq := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		if _, ok := seen[ln]; ok {
+			continue
+		}
+		seen[ln] = struct{}{}
+		uniq = append(uniq, ln)
+	}
+	for _, user := range users {
+		home := userHome(user)
+		path := home + "/.ssh/known_hosts"
+		cur, _, _ := sess.Run(ctx, "cat "+shellQuote(path)+" 2>/dev/null || true")
+		have := map[string]struct{}{}
+		for _, ln := range strings.Split(cur, "\n") {
+			ln = strings.TrimSpace(ln)
+			if ln == "" {
+				continue
+			}
+			have[ln] = struct{}{}
+		}
+		merged := make([]string, 0, len(have)+len(uniq))
+		for ln := range have {
+			merged = append(merged, ln)
+		}
+		for _, ln := range uniq {
+			if _, ok := have[ln]; ok {
+				continue
+			}
+			merged = append(merged, ln)
+		}
+		sort.Strings(merged)
+		content := strings.Join(merged, "\n") + "\n"
+		write := fmt.Sprintf(
+			"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+				"printf %%s %[3]s | tee %[4]s >/dev/null && "+
+				"chown %[1]s:%[1]s %[4]s && chmod 0644 %[4]s",
+			shellQuote(user), shellQuote(home), shellQuote(content), shellQuote(path),
+		)
+		if _, _, err := sess.Run(ctx, write); err != nil {
+			return 0, fmt.Errorf("write known_hosts for %s: %w", user, err)
+		}
+	}
+	return len(uniq), nil
+}
+
+func userHome(user string) string {
+	if user == "root" {
+		return "/root"
+	}
+	return "/home/" + user
+}
+
+func shellQuoteEach(xs []string) []string {
+	out := make([]string, len(xs))
+	for i, x := range xs {
+		out[i] = shellQuote(x)
+	}
+	return out
 }
 
 // ---- helpers -------------------------------------------------------------
