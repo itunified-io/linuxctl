@@ -12,10 +12,13 @@ type BuildInfo struct {
 	Date    string
 }
 
-// globalFlags holds the values bound to persistent root flags.
+// globalFlags holds the values bound to persistent root flags. `stack` is the
+// canonical field; `env` is a deprecated alias retained for one release (#17).
+// If both are set, `stack` wins and a warning is emitted in stackFromFlags().
 type globalFlags struct {
 	context string
-	env     string
+	stack   string
+	env     string // deprecated alias for --stack; remove next release
 	host    string
 	format  string
 	yes     bool
@@ -37,8 +40,14 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 
 	pf := cmd.PersistentFlags()
 	pf.StringVar(&gf.context, "context", "", "Named context from ~/.linuxctl/config.yaml")
-	pf.StringVar(&gf.env, "env", "", "Named env from ~/.linuxctl/envs.yaml")
-	pf.StringVar(&gf.host, "host", "", "Restrict to a single host from the env")
+	pf.StringVar(&gf.stack, "stack", "", "Named stack from ~/.linuxctl/stacks.yaml")
+	// Deprecated: `--env` is an alias for `--stack` (#17). Kept for one release.
+	pf.StringVar(&gf.env, "env", "", "Deprecated alias for --stack (will be removed in the next release)")
+	if f := pf.Lookup("env"); f != nil {
+		f.Deprecated = "use --stack instead"
+		f.Hidden = true
+	}
+	pf.StringVar(&gf.host, "host", "", "Restrict to a single host from the stack")
 	pf.StringVar(&gf.format, "format", "table", "table|json|yaml|plain")
 	pf.BoolVar(&gf.yes, "yes", false, "Non-interactive; skip confirm prompts")
 	pf.BoolVar(&gf.dryRun, "dry-run", false, "Alias for plan; never mutate")

@@ -13,7 +13,7 @@ func newDiffCmd() *cobra.Command {
 		Use:   "diff [env.yaml]",
 		Short: "Read-only drift report across all managers",
 		RunE: func(_ *cobra.Command, args []string) error {
-			linux, err := loadLinux(envPathFromArgs(args))
+			linux, err := loadLinux(stackPathFromArgs(args))
 			if err != nil {
 				return err
 			}

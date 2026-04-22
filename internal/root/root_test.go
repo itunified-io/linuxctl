@@ -58,7 +58,7 @@ func TestRootCmd_PersistentFlagsExposed(t *testing.T) {
 		t.Fatalf("help: %v", err)
 	}
 	for _, want := range []string{
-		"--context", "--env", "--host", "--format", "--yes",
+		"--context", "--stack", "--host", "--format", "--yes",
 		"--dry-run", "--license", "--verbose",
 	} {
 		if !strings.Contains(out, want) {
@@ -813,22 +813,48 @@ func TestDiff_BadManifest(t *testing.T) {
 
 // ---- runtime.go helpers (direct) -----------------------------------------
 
-func TestEnvPathFromArgs(t *testing.T) {
+func TestStackPathFromArgs(t *testing.T) {
+	gf = globalFlags{}
+	if got := stackPathFromArgs([]string{"foo.yaml"}); got != "foo.yaml" {
+		t.Errorf("positional: got %q", got)
+	}
+	// --stack flag (canonical)
+	gf = globalFlags{stack: "stack-flag.yaml"}
+	if got := stackPathFromArgs(nil); got != "stack-flag.yaml" {
+		t.Errorf("--stack flag: got %q", got)
+	}
+	// --env deprecated alias: still honored, emits warning
+	gf = globalFlags{env: "env-flag.yaml"}
+	if got := stackPathFromArgs(nil); got != "env-flag.yaml" {
+		t.Errorf("--env alias: got %q", got)
+	}
+	// Both set: --stack wins
+	gf = globalFlags{stack: "stack-wins.yaml", env: "env-loses.yaml"}
+	if got := stackPathFromArgs(nil); got != "stack-wins.yaml" {
+		t.Errorf("--stack+--env: got %q", got)
+	}
+	// Default
+	gf = globalFlags{}
+	if got := stackPathFromArgs(nil); got != "env.yaml" {
+		t.Errorf("default: got %q", got)
+	}
+	if got := stackPathFromArgs([]string{""}); got != "env.yaml" {
+		t.Errorf("empty positional: got %q", got)
+	}
+}
+
+// TestEnvPathFromArgs_ShimStillWorks verifies the deprecated envPathFromArgs
+// shim forwards to stackPathFromArgs (#17 backward-compat window).
+func TestEnvPathFromArgs_ShimStillWorks(t *testing.T) {
 	gf = globalFlags{}
 	if got := envPathFromArgs([]string{"foo.yaml"}); got != "foo.yaml" {
-		t.Errorf("positional: got %q", got)
+		t.Errorf("shim positional: got %q", got)
 	}
 	gf.env = "flag.yaml"
 	if got := envPathFromArgs(nil); got != "flag.yaml" {
-		t.Errorf("flag: got %q", got)
+		t.Errorf("shim flag: got %q", got)
 	}
 	gf = globalFlags{}
-	if got := envPathFromArgs(nil); got != "env.yaml" {
-		t.Errorf("default: got %q", got)
-	}
-	if got := envPathFromArgs([]string{""}); got != "env.yaml" {
-		t.Errorf("empty positional: got %q", got)
-	}
 }
 
 func TestOpenSessionReal(t *testing.T) {

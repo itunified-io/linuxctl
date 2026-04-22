@@ -10,17 +10,31 @@ import (
 	"github.com/itunified-io/linuxctl/pkg/session"
 )
 
-// envPathFromArgs returns the first positional argument, or --env flag value,
-// or the current directory's default "env.yaml".
-func envPathFromArgs(args []string) string {
+// stackPathFromArgs returns the first positional argument, or --stack flag
+// value (preferred), or --env flag value (deprecated alias), or the current
+// directory's default "env.yaml". If both --stack and --env are set, --stack
+// wins and a warning is printed to stderr.
+func stackPathFromArgs(args []string) string {
 	if len(args) > 0 && args[0] != "" {
 		return args[0]
 	}
+	if gf.stack != "" {
+		if gf.env != "" && gf.env != gf.stack {
+			fmt.Fprintln(os.Stderr, "warning: both --stack and --env set; --stack wins (--env is deprecated)")
+		}
+		return gf.stack
+	}
 	if gf.env != "" {
+		fmt.Fprintln(os.Stderr, "warning: --env is deprecated; use --stack instead")
 		return gf.env
 	}
 	return "env.yaml"
 }
+
+// envPathFromArgs is a deprecated shim that forwards to stackPathFromArgs.
+// Kept because internal callers and tests still reference this name; remove
+// in a follow-up once the call sites are migrated.
+func envPathFromArgs(args []string) string { return stackPathFromArgs(args) }
 
 // openSession returns a session for the current --host flag. Empty host →
 // local session; otherwise a lazy SSH descriptor (not dialed). Exposed as a
