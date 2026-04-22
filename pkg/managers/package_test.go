@@ -300,6 +300,102 @@ func TestPackageManager_NoSession(t *testing.T) {
 	}
 }
 
+func TestPackageManager_DetectDistro_RHEL7_YumFallback(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", `ID="rhel"
+VERSION_ID="7.9"
+`, nil).
+		on("command -v dnf", "", fmt.Errorf("not found")) // no dnf → yum
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "yum" {
+		t.Errorf("want yum, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_SLES(t *testing.T) {
+	ms := newMockSession().on("cat /etc/os-release", `ID="sles"
+`, nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "zypper" {
+		t.Errorf("want zypper, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_FromIDLike(t *testing.T) {
+	// Primary ID is unknown but ID_LIKE lists ubuntu.
+	ms := newMockSession().on("cat /etc/os-release", `ID="linuxmint"
+ID_LIKE="ubuntu debian"
+`, nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "apt-get" {
+		t.Errorf("want apt-get, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_Rocky(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", `ID="rocky"
+ID_LIKE="rhel fedora centos"
+`, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.family != familyRPM {
+		t.Errorf("want familyRPM, got %q", p.family)
+	}
+}
+
+func TestPackageManager_Rollback_NoSession(t *testing.T) {
+	p := NewPackageManager()
+	err := p.Rollback(context.Background(), []Change{{Action: "create", After: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestPackageManager_Rollback_DetectFails(t *testing.T) {
+	ms := newMockSession().on("cat /etc/os-release", "ID=plan9\n", nil)
+	p := NewPackageManager().WithSession(ms)
+	err := p.Rollback(context.Background(), []Change{{Action: "create", After: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestPackageManager_Apply_UnknownAction(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	res, _ := p.Apply(context.Background(), []Change{{Action: "weird", After: "x"}}, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed, got %d", len(res.Failed))
+	}
+}
+
+func TestPackageManager_Apply_EmptyChanges(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	res, err := p.Apply(context.Background(), nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 {
+		t.Error("expected no applied")
+	}
+}
+
 func TestIsLockError(t *testing.T) {
 	cases := map[string]bool{
 		"":                                                  false,

@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -318,5 +319,94 @@ func TestDiskManager_coerceLayout_Unsupported(t *testing.T) {
 	v, _ := coerceLayout(nil)
 	if v != nil {
 		t.Error("nil spec should coerce to nil")
+	}
+}
+
+func TestDiskChangeCmd_AllOps(t *testing.T) {
+	cases := []struct {
+		after   map[string]any
+		wantSub string
+		wantErr bool
+	}{
+		{after: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}, wantSub: "pvcreate -f /dev/sdb"},
+		{after: map[string]any{"op": "vgcreate", "name": "vg1", "pvs": []string{"/dev/sdb"}}, wantSub: "vgcreate vg1 /dev/sdb"},
+		{after: map[string]any{"op": "vgcreate", "name": "vg1", "pvs": []any{"/dev/sdb"}}, wantSub: "vgcreate vg1 /dev/sdb"},
+		{after: map[string]any{"op": "lvcreate", "name": "lv1", "size": "1G", "vg": "vg1"}, wantSub: "lvcreate -y -n lv1 -L 1G vg1"},
+		{after: map[string]any{"op": "mkfs", "fstype": "ext4", "device": "/dev/vg1/lv1"}, wantSub: "mkfs.ext4 -F /dev/vg1/lv1"},
+		{after: map[string]any{"op": "mount", "mountpoint": "/data"}, wantSub: "mount /data"},
+		{after: map[string]any{"op": "fstab", "entry": "foo"}, wantSub: "/etc/fstab"},
+		{after: map[string]any{"op": "error", "reason": "boom"}, wantErr: true},
+		{after: map[string]any{"op": "mystery"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := diskChangeCmd(Change{After: tc.after})
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("expected err for %v", tc.after)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("unexpected err: %v", err)
+			continue
+		}
+		if !strings.Contains(got, tc.wantSub) {
+			t.Errorf("%v: got %q, missing %q", tc.after, got, tc.wantSub)
+		}
+	}
+}
+
+func TestDiskChangeCmd_MissingAfterMap(t *testing.T) {
+	_, err := diskChangeCmd(Change{Target: "foo"})
+	if err == nil {
+		t.Error("expected err for non-map After")
+	}
+}
+
+func TestDiskManager_Apply_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	changes := []Change{{After: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDiskManager_Apply_ErrorOpFails(t *testing.T) {
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "error", "reason": "nope"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestDiskManager_Rollback_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	err := d.Rollback(context.Background(), []Change{{RollbackCmd: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestDiskManager_Rollback_CmdFails(t *testing.T) {
+	ms := newFullMock().on("lvremove", "", errors.New("busy"))
+	d := NewDiskManager().WithSession(ms)
+	err := d.Rollback(context.Background(), []Change{{RollbackCmd: "lvremove -f /dev/vg1/lv1"}})
+	if err == nil {
+		t.Fatal("expected err on rollback cmd fail")
+	}
+}
+
+func TestDiskManager_Rollback_SkipsEmptyCmd(t *testing.T) {
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{RollbackCmd: ""}, {RollbackCmd: "echo ok"}}
+	if err := d.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 1 {
+		t.Errorf("expected 1 cmd, got %d", len(ms.cmds))
 	}
 }
