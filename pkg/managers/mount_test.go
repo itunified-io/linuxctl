@@ -189,6 +189,157 @@ func TestMountManager_DependsOn(t *testing.T) {
 	}
 }
 
+func TestBuildMountCmd_Table(t *testing.T) {
+	cases := []struct {
+		name        string
+		after       map[string]any
+		wantSubs    []string
+		wantMkdir   string
+		wantErr     bool
+	}{
+		{
+			name: "cifs_no_opts",
+			after: map[string]any{
+				"op": "cifs_mount", "source": "//srv/s", "mountpoint": "/mnt/s",
+				"credentials": "/etc/cifs/creds",
+			},
+			wantSubs:  []string{"mount -t cifs", "credentials=/etc/cifs/creds", "//srv/s", "/mnt/s"},
+			wantMkdir: "/mnt/s",
+		},
+		{
+			name: "cifs_with_opts",
+			after: map[string]any{
+				"op": "cifs_mount", "source": "//srv/s", "mountpoint": "/mnt/s",
+				"options": "ro,vers=3.0", "credentials": "/etc/cifs/creds",
+			},
+			wantSubs:  []string{"mount -t cifs", "ro,vers=3.0,credentials=/etc/cifs/creds"},
+			wantMkdir: "/mnt/s",
+		},
+		{
+			name: "nfs_default_opts",
+			after: map[string]any{
+				"op": "nfs_mount", "source": "srv:/ex", "mountpoint": "/data",
+			},
+			wantSubs:  []string{"mount -t nfs", "'defaults'", "'srv:/ex'", "'/data'"},
+			wantMkdir: "/data",
+		},
+		{
+			name: "nfs_with_opts",
+			after: map[string]any{
+				"op": "nfs_mount", "source": "srv:/ex", "mountpoint": "/data",
+				"options": "ro,soft",
+			},
+			wantSubs:  []string{"mount -t nfs", "ro,soft"},
+			wantMkdir: "/data",
+		},
+		{
+			name: "bind",
+			after: map[string]any{
+				"op": "bind_mount", "source": "/src", "mountpoint": "/dst",
+			},
+			wantSubs:  []string{"mount --bind", "'/src'", "'/dst'"},
+			wantMkdir: "/dst",
+		},
+		{
+			name: "tmpfs_no_opts",
+			after: map[string]any{
+				"op": "tmpfs_mount", "mountpoint": "/run/cache",
+			},
+			wantSubs:  []string{"mount -t tmpfs", "'defaults'", "tmpfs", "/run/cache"},
+			wantMkdir: "/run/cache",
+		},
+		{
+			name: "tmpfs_with_opts",
+			after: map[string]any{
+				"op": "tmpfs_mount", "mountpoint": "/run/cache", "options": "size=100M",
+			},
+			wantSubs:  []string{"mount -t tmpfs", "size=100M"},
+			wantMkdir: "/run/cache",
+		},
+		{
+			name: "fstab_persistent",
+			after: map[string]any{
+				"op": "fstab", "entry": "//srv/s /mnt/s cifs defaults 0 0",
+			},
+			wantSubs:  []string{"grep -qxF", "/etc/fstab", "//srv/s /mnt/s"},
+			wantMkdir: "",
+		},
+		{
+			name:    "unknown_op",
+			after:   map[string]any{"op": "something"},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, mkdir, err := buildMountCmd(tc.after)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if mkdir != tc.wantMkdir {
+				t.Errorf("mkdir: want %q got %q", tc.wantMkdir, mkdir)
+			}
+			for _, s := range tc.wantSubs {
+				if !strings.Contains(cmd, s) {
+					t.Errorf("cmd %q missing %q", cmd, s)
+				}
+			}
+		})
+	}
+}
+
+func TestMountManager_ApplyOne_MissingAfter(t *testing.T) {
+	ms := newFullMock()
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: "not a map"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMountManager_ApplyOne_UnknownOp(t *testing.T) {
+	ms := newFullMock()
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{"op": "mystery"}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMountManager_ApplyOne_CIFSCredentials_EmptySkipped(t *testing.T) {
+	ms := newFullMock()
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{
+		"op": "cifs_credentials", "path": "/etc/cifs/creds",
+	}})
+	if err != nil {
+		t.Fatalf("should silently skip: %v", err)
+	}
+}
+
+func TestMountManager_Apply_NoSession(t *testing.T) {
+	m := NewMountManager()
+	_, err := m.Apply(context.Background(), []Change{{After: map[string]any{"op": "bind_mount"}}}, false)
+	if err == nil {
+		t.Fatal("expected error without session")
+	}
+}
+
+func TestMountManager_Rollback_NoSession(t *testing.T) {
+	m := NewMountManager()
+	err := m.Rollback(context.Background(), []Change{{RollbackCmd: "foo"}})
+	if err == nil {
+		t.Fatal("expected error without session")
+	}
+}
+
 // -------- helpers --------
 
 func collectOps(changes []Change) []string {
