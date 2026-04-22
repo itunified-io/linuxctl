@@ -353,6 +353,24 @@ func TestUserManager_Rollback_NoSession(t *testing.T) {
 	}
 }
 
+func TestUserManager_Rollback_CreateUserErrStops(t *testing.T) {
+	ms := newMockSession().on("userdel -r", "", fmt.Errorf("busy"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/bob", Action: "create", After: UserSpec{Name: "bob"}}}
+	if err := u.Rollback(context.Background(), changes); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestUserManager_Rollback_GroupDelErr(t *testing.T) {
+	ms := newMockSession().on("groupdel", "", fmt.Errorf("in use"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "group/dev", Action: "create", After: GroupSpec{Name: "dev"}}}
+	if err := u.Rollback(context.Background(), changes); err == nil {
+		t.Error("expected err")
+	}
+}
+
 func TestUserManager_Rollback_UpdateSkipsNonMatchingBefore(t *testing.T) {
 	ms := newMockSession()
 	u := NewUserManager().WithSession(ms)
@@ -445,6 +463,143 @@ func TestUserManager_Run_ErrWithStderr(t *testing.T) {
 	err := u.run(context.Background(), "fail")
 	if err == nil || !strings.Contains(err.Error(), "oh no") {
 		t.Errorf("want err with stderr, got %v", err)
+	}
+}
+
+func TestUserManager_CreateUser_SSHKeysFail(t *testing.T) {
+	ms := newMockSession()
+	ms.on("install -d", "", fmt.Errorf("boom"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create",
+		After: UserSpec{Name: "alice", SSHKeys: []string{"ssh-ed25519 x"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestUserManager_CreateUser_PasswordFails(t *testing.T) {
+	ms := newMockSession().on("chpasswd", "", fmt.Errorf("bad hash"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice", Password: "$6$x"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestUserManager_CreateUser_WithPassword(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice", Password: "$6$hash"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("chpasswd -e") {
+		t.Error("expected chpasswd")
+	}
+}
+
+func TestUserManager_CreateUser_UseraddFails(t *testing.T) {
+	ms := newMockSession().on("useradd", "", fmt.Errorf("exists"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Error("expected failure")
+	}
+}
+
+func TestUserManager_UpdateUser_OnlyHome(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Home: "/data/alice"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("usermod -d") {
+		t.Error("expected usermod -d")
+	}
+}
+
+func TestUserManager_UpdateUser_GIDFails(t *testing.T) {
+	ms := newMockSession().on("usermod -g", "", fmt.Errorf("no such group"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", GID: "missing"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_GroupsFails(t *testing.T) {
+	ms := newMockSession().on("usermod -G", "", fmt.Errorf("group missing"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Groups: []string{"nope"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_KeysFails(t *testing.T) {
+	ms := newMockSession().on("install -d", "", fmt.Errorf("no home"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", SSHKeys: []string{"ssh-ed25519 x"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_OnlyShell(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Shell: "/bin/zsh"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("usermod -s") {
+		t.Error("expected usermod -s")
+	}
+}
+
+func TestUserManager_GetGroup_Parsing(t *testing.T) {
+	ms := newMockSession().on("getent group 'staff'", "staff:x:1010:alice,bob\n", nil)
+	u := NewUserManager().WithSession(ms)
+	g, err := u.getGroup(context.Background(), "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !g.Exists || g.GID != 1010 || len(g.Members) != 2 {
+		t.Errorf("unexpected: %+v", g)
+	}
+}
+
+func TestUserManager_GetGroup_NotFound(t *testing.T) {
+	ms := newMockSession().on("getent group 'missing'", "", fmt.Errorf("exit 2"))
+	u := NewUserManager().WithSession(ms)
+	g, _ := u.getGroup(context.Background(), "missing")
+	if g.Exists {
+		t.Error("should not exist")
+	}
+}
+
+func TestUserManager_GetGroup_MalformedReturnsMissing(t *testing.T) {
+	ms := newMockSession().on("getent group 'weird'", "junk\n", nil)
+	u := NewUserManager().WithSession(ms)
+	g, _ := u.getGroup(context.Background(), "weird")
+	if g.Exists {
+		t.Error("should not exist for malformed output")
+	}
+}
+
+func TestUserManager_GetUser_MalformedReturnsMissing(t *testing.T) {
+	ms := newMockSession().on("getent passwd 'x'", "short\n", nil)
+	u := NewUserManager().WithSession(ms)
+	_, ok, _ := u.getUser(context.Background(), "x")
+	if ok {
+		t.Error("malformed → not ok")
 	}
 }
 

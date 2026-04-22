@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -374,6 +375,70 @@ func TestMountManager_Verify_PlanError(t *testing.T) {
 	vr, err := m.Verify(context.Background(), "bogus")
 	if err == nil {
 		t.Errorf("expected err; got vr=%+v", vr)
+	}
+}
+
+func TestMountManager_ApplyOne_MkdirFails(t *testing.T) {
+	ms := newFullMock().on("mkdir -p", "", fmt.Errorf("denied"))
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{"op": "bind_mount", "source": "/a", "mountpoint": "/b"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestMountManager_ApplyOne_MountCmdFails(t *testing.T) {
+	ms := newFullMock().on("mount --bind", "", fmt.Errorf("EBUSY"))
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{"op": "bind_mount", "source": "/a", "mountpoint": "/b"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestMountManager_ApplyOne_CIFSCredentials_Full(t *testing.T) {
+	ms := newFullMock()
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{
+		"op": "cifs_credentials", "path": "/etc/cifs/creds",
+		"username": "u", "password": "p",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ms.files["/etc/cifs/creds"]; !ok {
+		t.Error("expected credentials written")
+	}
+}
+
+func TestMountManager_ApplyOne_CIFSCredentials_MkdirFails(t *testing.T) {
+	ms := newFullMock().on("mkdir -p", "", fmt.Errorf("denied"))
+	m := NewMountManager().WithSession(ms)
+	err := m.applyOne(context.Background(), Change{After: map[string]any{
+		"op": "cifs_credentials", "path": "/etc/cifs/creds",
+		"username": "u", "password": "p",
+	}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestMountManager_Apply_FailureStopsEarly(t *testing.T) {
+	ms := newFullMock().on("mount --bind", "", fmt.Errorf("boom"))
+	m := NewMountManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "bind_mount", "source": "/a", "mountpoint": "/b"}}}
+	res, err := m.Apply(context.Background(), changes, false)
+	if err == nil || len(res.Failed) != 1 {
+		t.Errorf("expected err + 1 failed; got err=%v, res=%+v", err, res)
+	}
+}
+
+func TestMountManager_Rollback_CmdFails(t *testing.T) {
+	ms := newFullMock().on("umount", "", fmt.Errorf("busy"))
+	m := NewMountManager().WithSession(ms)
+	changes := []Change{{Target: "/a", RollbackCmd: "umount /a"}}
+	if err := m.Rollback(context.Background(), changes); err == nil {
+		t.Fatal("expected err")
 	}
 }
 

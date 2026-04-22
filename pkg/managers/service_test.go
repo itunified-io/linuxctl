@@ -318,6 +318,44 @@ func TestServiceManager_ApplyOne_UnexpectedAfter(t *testing.T) {
 	}
 }
 
+func TestServiceManager_Observe_MaskedUnit(t *testing.T) {
+	ms := newSvcMock().
+		on("is-enabled 'svc'", "masked\n", nil).
+		on("is-active 'svc'", "inactive\n", nil)
+	s := NewServiceManager().WithSession(ms)
+	changes, err := s.Plan(context.Background(), []config.ServiceState{{Name: "svc", Enabled: true, State: "running"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Masked must still produce changes but they carry Masked=true.
+	hasMasked := false
+	for _, ch := range changes {
+		if op, ok := ch.After.(serviceEnableOp); ok && op.Masked {
+			hasMasked = true
+		}
+		if op, ok := ch.After.(serviceStateOp); ok && op.Masked {
+			hasMasked = true
+		}
+	}
+	if !hasMasked {
+		t.Errorf("expected at least one Masked=true; got %+v", changes)
+	}
+}
+
+func TestServiceManager_Observe_DisabledUnit(t *testing.T) {
+	ms := newSvcMock().
+		on("is-enabled 'svc'", "disabled\n", nil).
+		on("is-active 'svc'", "inactive\n", nil)
+	s := NewServiceManager().WithSession(ms)
+	changes, err := s.Plan(context.Background(), []config.ServiceState{{Name: "svc", Enabled: true, State: "running"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Error("expected enable/start changes")
+	}
+}
+
 func TestServiceManager_Apply_StateRetry(t *testing.T) {
 	// First invocation of start fails, retry succeeds (mock always returns nil so fabricate with error once).
 	ms := newSvcMock()

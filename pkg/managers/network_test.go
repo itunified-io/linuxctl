@@ -135,6 +135,15 @@ func TestNetwork_ApplyHostname(t *testing.T) {
 	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "hostnamectl set-hostname 'new-host'")
 }
 
+func TestNetwork_ApplyHostname_Fails(t *testing.T) {
+	mock := newNetMock()
+	mock.responses = append(mock.responses, fwResp{match: "hostnamectl set-hostname", err: errors.New("denied")})
+	nm := NewNetworkManager().WithSession(mock)
+	changes := []Change{{Target: "hostname", Action: "update", After: "x"}}
+	res, _ := nm.Apply(context.Background(), changes, false)
+	require.Len(t, res.Failed, 1)
+}
+
 func TestNetwork_ApplyResolvConf(t *testing.T) {
 	mock := newNetMock()
 	nm := NewNetworkManager().WithSession(mock)

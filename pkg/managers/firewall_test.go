@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -501,10 +502,113 @@ func TestFirewall_DetectBackend_FromCommand(t *testing.T) {
 	require.Equal(t, FirewallBackendFirewalld, b)
 }
 
+func TestFirewall_DetectBackend_NftablesFallback(t *testing.T) {
+	mock := newFWMock()
+	// /etc/os-release errors → skip to command -v probes.
+	mock.responses = append(mock.responses,
+		fwResp{match: "/etc/os-release", err: errors.New("read err")},
+		fwResp{match: "command -v firewall-cmd", err: errors.New("not found")},
+		fwResp{match: "command -v ufw", err: errors.New("not found")})
+	fm := NewFirewallManager().WithSession(mock)
+	b, err := fm.detectBackend(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, FirewallBackendNftables, b)
+}
+
+func TestFirewall_DetectBackend_UFWFromCommand(t *testing.T) {
+	mock := newFWMock()
+	mock.responses = append(mock.responses,
+		fwResp{match: "/etc/os-release", err: errors.New("read err")},
+		fwResp{match: "command -v firewall-cmd", err: errors.New("not found")})
+	fm := NewFirewallManager().WithSession(mock)
+	b, err := fm.detectBackend(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, FirewallBackendUFW, b)
+}
+
 func TestFirewall_ChooseMap_BothNilReturnsEmpty(t *testing.T) {
 	m, ok := chooseMap(Change{})
 	require.False(t, ok)
 	require.Empty(t, m)
+}
+
+func TestFirewall_Snapshot_FirewalldInactive(t *testing.T) {
+	mock := newFWMock().on("firewall-cmd --state", "not running\n")
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	cf, err := fm.snapshot(context.Background())
+	require.NoError(t, err)
+	require.False(t, cf.Active)
+}
+
+func TestFirewall_Snapshot_Nftables(t *testing.T) {
+	mock := newFWMock().on("is-active nftables", "active\n")
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendNftables)
+	cf, err := fm.snapshot(context.Background())
+	require.NoError(t, err)
+	require.True(t, cf.Active)
+}
+
+func TestFirewall_Snapshot_FirewalldZonesErrReturnsEmpty(t *testing.T) {
+	mock := newFWMock()
+	mock.responses = append(mock.responses,
+		fwResp{match: "firewall-cmd --state", stdout: "running\n"},
+		fwResp{match: "firewall-cmd --list-all-zones", err: errors.New("boom")})
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	cf, err := fm.snapshot(context.Background())
+	require.NoError(t, err)
+	require.True(t, cf.Active)
+	require.Empty(t, cf.Ports)
+}
+
+func TestFirewall_Snapshot_DetectFromScratch(t *testing.T) {
+	// No backend set; forces detectBackend — mock returns ID=ubuntu → UFW.
+	mock := newFWMock().on("/etc/os-release", "ID=ubuntu\n").
+		on("ufw status verbose", "Status: inactive\n")
+	fm := NewFirewallManager().WithSession(mock)
+	cf, err := fm.snapshot(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, FirewallBackendUFW, cf.Backend)
+}
+
+func TestFirewall_PortSet_Range(t *testing.T) {
+	s := portSet([]config.PortRule{
+		{Range: "8000-8100", Proto: "tcp"},
+		{Port: 22},          // default proto tcp
+		{Proto: "udp"},      // neither port nor range → skipped
+	})
+	require.True(t, s["8000-8100/tcp"])
+	require.True(t, s["22/tcp"])
+	require.Len(t, s, 2)
+}
+
+func TestFirewall_Apply_DetectErrors(t *testing.T) {
+	// Without backend override, detectBackend falls back to Nftables when no hints.
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock)
+	changes := []Change{{Action: "add_port", After: map[string]string{"zone": "default", "port": "80/tcp"}}}
+	_, err := fm.Apply(context.Background(), changes, false)
+	// Nftables doesn't support port ops → failure expected.
+	require.NoError(t, err)
+}
+
+func TestFirewall_Apply_ReloadError(t *testing.T) {
+	mock := newFWMock()
+	// Make the reload fail.
+	mock.responses = append(mock.responses, fwResp{match: "firewall-cmd --reload", err: errors.New("reload fail")})
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	changes := []Change{{Action: "add_port", After: map[string]string{"zone": "public", "port": "80/tcp"}}}
+	_, err := fm.Apply(context.Background(), changes, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reload")
+}
+
+func TestFirewall_Apply_PortOpFails(t *testing.T) {
+	mock := newFWMock()
+	mock.responses = append(mock.responses, fwResp{match: "firewall-cmd --permanent", err: errors.New("zone missing")})
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	changes := []Change{{Action: "add_port", After: map[string]string{"zone": "public", "port": "80/tcp"}}}
+	res, _ := fm.Apply(context.Background(), changes, false)
+	require.Len(t, res.Failed, 1)
 }
 
 func TestFirewall_CastVariants(t *testing.T) {

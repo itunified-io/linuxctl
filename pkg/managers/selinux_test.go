@@ -299,6 +299,62 @@ func TestSELinuxManager_ReadBoolean_On(t *testing.T) {
 	}
 }
 
+func TestSELinuxManager_ApplyMode_Permissive(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "enforcing", After: "permissive"}
+	if err := m.applyMode(context.Background(), &ch); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range ms.cmds {
+		if strings.Contains(c, "setenforce 0") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected setenforce 0; got %v", ms.cmds)
+	}
+}
+
+func TestSELinuxManager_ApplyBoolean_Off(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/bool/httpd_can_network_connect", After: false}
+	if err := m.applyBoolean(context.Background(), ch); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(ms.cmds, " | ")
+	if !strings.Contains(joined, "setsebool -P") || !strings.Contains(joined, "off") {
+		t.Errorf("expected setsebool off; got %v", ms.cmds)
+	}
+}
+
+func TestSELinuxManager_ApplyMode_SetenforceFails(t *testing.T) {
+	ms := newMockSession().on("setenforce", "", fmt.Errorf("not permitted"))
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "permissive", After: "enforcing"}
+	if err := m.applyMode(context.Background(), &ch); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSELinuxManager_ApplyMode_FromDisabled(t *testing.T) {
+	// Transition from disabled → enforcing: no setenforce, only sed.
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "disabled", After: "enforcing"}
+	if err := m.applyMode(context.Background(), &ch); err != nil {
+		t.Fatal(err)
+	}
+	// No setenforce call.
+	for _, c := range ms.cmds {
+		if strings.Contains(c, "setenforce") {
+			t.Errorf("setenforce should not run when transitioning from disabled; got %v", ms.cmds)
+		}
+	}
+}
+
 func TestSELinuxManager_ApplyMode_BadType(t *testing.T) {
 	ms := newMockSession()
 	m := NewSELinuxManager().WithSession(ms)
@@ -350,6 +406,21 @@ func TestSELinuxManager_Run_ErrWithStderr(t *testing.T) {
 	err := m.run(context.Background(), "failing-cmd")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("want err with stderr, got %v", err)
+	}
+}
+
+func TestSELinuxManager_CastValueSELinuxConfig(t *testing.T) {
+	got, err := castSELinuxConfig(config.SELinuxConfig{Mode: "permissive"})
+	if err != nil || got == nil {
+		t.Errorf("value form: got (%v, %v)", got, err)
+	}
+}
+
+func TestSELinuxManager_CastNilLinuxPointer(t *testing.T) {
+	var l *config.Linux
+	got, err := castSELinuxConfig(l)
+	if err != nil || got != nil {
+		t.Errorf("nil *Linux → nil,nil; got (%v,%v)", got, err)
 	}
 }
 

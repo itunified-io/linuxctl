@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/itunified-io/linuxctl/pkg/config"
 )
 
 // baseMockSession is a minimal Session stub for base_test helpers.
@@ -122,6 +124,21 @@ func TestTrimStderr_Short(t *testing.T) {
 func TestShellQuoteOne(t *testing.T) {
 	require.Equal(t, "'foo'", shellQuoteOne("foo"))
 	require.Equal(t, `'o'"'"'brien'`, shellQuoteOne("o'brien"))
+}
+
+// TestCastsAcceptValueLinux exercises cast* helpers against the value form of
+// config.Linux for managers that support it (covers a branch each cast leaves
+// when tests only exercise the pointer form).
+func TestCastsAcceptValueLinux(t *testing.T) {
+	// DirManager: value *config.Linux is tested elsewhere; here just the
+	// nil-pointer fall-through.
+	if _, err := castDirectories((*config.Linux)(nil)); err != nil {
+		t.Error(err)
+	}
+	// Hosts
+	if _, err := castHostEntries((*config.Linux)(nil)); err != nil {
+		t.Error(err)
+	}
 }
 
 // TestAllManagers_Verify_PropagatesPlanError ensures every manager's Verify

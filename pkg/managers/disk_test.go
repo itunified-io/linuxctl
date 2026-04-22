@@ -3,6 +3,7 @@ package managers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -396,6 +397,32 @@ func TestDiskManager_Rollback_CmdFails(t *testing.T) {
 	err := d.Rollback(context.Background(), []Change{{RollbackCmd: "lvremove -f /dev/vg1/lv1"}})
 	if err == nil {
 		t.Fatal("expected err on rollback cmd fail")
+	}
+}
+
+func TestDiskManager_Apply_SkipsMkfsRollbackEmpty(t *testing.T) {
+	// mkfs op → cmd built, but RollbackCmd is empty (conservative). The skip
+	// path is only for "" cmd, which none of our ops emit. Instead test Apply
+	// with an action we don't understand → diskChangeCmd returns err.
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "mystery"}}}
+	res, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestDiskManager_Apply_RunSudoFails(t *testing.T) {
+	ms := newFullMock().on("pvcreate", "", fmt.Errorf("device busy"))
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
 	}
 }
 

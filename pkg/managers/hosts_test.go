@@ -341,6 +341,19 @@ func TestHosts_CastSliceDirect(t *testing.T) {
 	require.Len(t, got, 1)
 }
 
+func TestHosts_RenderBlock_Empty(t *testing.T) {
+	require.Equal(t, "", renderBlock(nil))
+}
+
+func TestHosts_RenderBlock_SkipsInvalidEntries(t *testing.T) {
+	got := renderBlock([]config.HostEntry{
+		{IP: "", Names: []string{"a"}},     // missing IP
+		{IP: "1.2.3.4", Names: nil},        // missing names
+		{IP: "10.0.0.1", Names: []string{"foo"}},
+	})
+	require.Equal(t, "10.0.0.1  foo\n", got)
+}
+
 func TestHosts_Verify_PlanError(t *testing.T) {
 	mock := newHostsMock("")
 	hm := NewHostsManager().WithSession(mock)

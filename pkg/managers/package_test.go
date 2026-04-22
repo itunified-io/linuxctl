@@ -273,6 +273,13 @@ func TestPackageManager_CastPackages(t *testing.T) {
 	if _, err := castPackages(42); err == nil {
 		t.Error("wrong type must fail")
 	}
+	if _, err := castPackages(PackagesSpec{Install: []string{"x"}}); err != nil {
+		t.Errorf("value form: %v", err)
+	}
+	var np *PackagesSpec
+	if _, err := castPackages(np); err != nil {
+		t.Errorf("nil pointer: %v", err)
+	}
 }
 
 func TestPackageManager_Rollback_Delete(t *testing.T) {
@@ -381,6 +388,50 @@ func TestPackageManager_Apply_UnknownAction(t *testing.T) {
 	res, _ := p.Apply(context.Background(), []Change{{Action: "weird", After: "x"}}, false)
 	if len(res.Failed) != 1 {
 		t.Errorf("expected 1 failed, got %d", len(res.Failed))
+	}
+}
+
+func TestPackageManager_Apply_InstallFails(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil).
+		on("dnf install", "", fmt.Errorf("no such package"))
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{{Action: "create", After: "nosuch"}}
+	res, _ := p.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestPackageManager_Apply_RemoveBatched(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{
+		{Action: "delete", Before: "a"},
+		{Action: "delete", Before: "b"},
+	}
+	res, err := p.Apply(context.Background(), changes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 2 {
+		t.Errorf("expected 2 applied")
+	}
+}
+
+func TestPackageManager_Apply_RemoveFails(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil).
+		on("dnf remove", "", fmt.Errorf("locked"))
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{{Action: "delete", Before: "x"}}
+	res, _ := p.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed; got %+v", res)
 	}
 }
 

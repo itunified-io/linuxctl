@@ -348,6 +348,37 @@ func TestSysctl_Apply_WrongAfterType(t *testing.T) {
 	}
 }
 
+func TestSysctl_Plan_UnknownPreset(t *testing.T) {
+	ms := newFileMock()
+	s := NewSysctlManager().WithSession(ms)
+	changes, err := s.Plan(context.Background(), &config.Linux{SysctlPreset: "bogus-preset"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("bogus preset → no changes; got %+v", changes)
+	}
+}
+
+func TestSysctl_CastNilLinuxPointer(t *testing.T) {
+	var l *config.Linux
+	got, err := castLinuxForSysctl(l)
+	if err != nil || got == nil {
+		t.Errorf("nil → empty Linux; got (%v,%v)", got, err)
+	}
+}
+
+func TestSysctl_WriteAndReload_ReloadFails(t *testing.T) {
+	ms := newFileMock().on("sysctl -p", "", fmt.Errorf("bad key"))
+	ms.responses["sysctl -p"] = mockResponse{stderr: "kernel.bad: No such file", err: fmt.Errorf("bad key")}
+	s := NewSysctlManager().WithSession(ms)
+	changes := []Change{{Action: "update", After: sysctlApply{Body: "x=1\n"}}}
+	res, _ := s.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected failure; got %+v", res)
+	}
+}
+
 func TestSysctl_Plan_PresetMerge(t *testing.T) {
 	ms := newFileMock()
 	for _, k := range []string{"fs.aio-max-nr", "fs.file-max", "kernel.panic_on_oops",

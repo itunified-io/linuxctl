@@ -406,6 +406,48 @@ func TestSSHManager_Run_ErrWithStderr(t *testing.T) {
 	}
 }
 
+func TestSSHManager_ApplyAuthorizedKeys_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	err := m.applyAuthorizedKeys(context.Background(), Change{Target: "authorized_keys/alice", After: "wrong"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	err := m.applySSHDConfig(context.Background(), Change{After: "wrong"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_SSHDValidationFails(t *testing.T) {
+	ms := newMockSession().on("sshd -t", "", fmt.Errorf("bad config"))
+	m := NewSSHAuthManager().WithSession(ms)
+	ch := Change{Target: "sshd_config/drop-in", After: map[string]string{"PasswordAuthentication": "no"}}
+	err := m.applySSHDConfig(context.Background(), ch)
+	if err == nil {
+		t.Error("expected err")
+	}
+	// Should roll back: rm -f the drop-in.
+	if !ms.ranContaining("rm -f") {
+		t.Errorf("expected rm -f on sshd -t failure; got %v", ms.cmds)
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_WriteFails(t *testing.T) {
+	ms := newMockSession().on("install -d -m 0755", "", fmt.Errorf("ro fs"))
+	m := NewSSHAuthManager().WithSession(ms)
+	ch := Change{Target: "sshd_config/drop-in", After: map[string]string{"X": "y"}}
+	err := m.applySSHDConfig(context.Background(), ch)
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
 func TestSSHManager_CastVariants(t *testing.T) {
 	m := NewSSHAuthManager().WithSession(newMockSession())
 	cfg := config.SSHConfig{}
