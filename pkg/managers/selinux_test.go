@@ -2,6 +2,8 @@ package managers
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
@@ -254,5 +256,189 @@ func TestSELinuxManager_ReadMode_FallbackToGetenforce(t *testing.T) {
 	}
 	if mode != "enforcing" {
 		t.Errorf("want enforcing from fallback, got %q", mode)
+	}
+}
+
+func TestSELinuxManager_ReadMode_FallbackPermissiveDisabled(t *testing.T) {
+	ms := newMockSession().on("getenforce", "Permissive\n", nil)
+	m := NewSELinuxManager().WithSession(ms)
+	mode, _ := m.readMode(context.Background())
+	if mode != "permissive" {
+		t.Errorf("want permissive, got %q", mode)
+	}
+	ms2 := newMockSession().on("getenforce", "Disabled\n", nil)
+	m2 := NewSELinuxManager().WithSession(ms2)
+	mode2, _ := m2.readMode(context.Background())
+	if mode2 != "disabled" {
+		t.Errorf("want disabled, got %q", mode2)
+	}
+}
+
+func TestSELinuxManager_ReadMode_NoSession(t *testing.T) {
+	m := NewSELinuxManager()
+	mode, err := m.readMode(context.Background())
+	if err != nil || mode != "" {
+		t.Errorf("no session → empty, nil: got (%q, %v)", mode, err)
+	}
+}
+
+func TestSELinuxManager_ReadBoolean_NoSession(t *testing.T) {
+	m := NewSELinuxManager()
+	v, err := m.readBoolean(context.Background(), "httpd_can_network_connect")
+	if err != nil || v {
+		t.Errorf("no session → false, nil: got (%v, %v)", v, err)
+	}
+}
+
+func TestSELinuxManager_ReadBoolean_On(t *testing.T) {
+	ms := newMockSession().on("getsebool", "httpd_can_network_connect --> on\n", nil)
+	m := NewSELinuxManager().WithSession(ms)
+	v, _ := m.readBoolean(context.Background(), "httpd_can_network_connect")
+	if !v {
+		t.Error("expected true")
+	}
+}
+
+func TestSELinuxManager_ApplyMode_Permissive(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "enforcing", After: "permissive"}
+	if err := m.applyMode(context.Background(), &ch); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range ms.cmds {
+		if strings.Contains(c, "setenforce 0") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected setenforce 0; got %v", ms.cmds)
+	}
+}
+
+func TestSELinuxManager_ApplyBoolean_Off(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/bool/httpd_can_network_connect", After: false}
+	if err := m.applyBoolean(context.Background(), ch); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(ms.cmds, " | ")
+	if !strings.Contains(joined, "setsebool -P") || !strings.Contains(joined, "off") {
+		t.Errorf("expected setsebool off; got %v", ms.cmds)
+	}
+}
+
+func TestSELinuxManager_ApplyMode_SetenforceFails(t *testing.T) {
+	ms := newMockSession().on("setenforce", "", fmt.Errorf("not permitted"))
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "permissive", After: "enforcing"}
+	if err := m.applyMode(context.Background(), &ch); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSELinuxManager_ApplyMode_FromDisabled(t *testing.T) {
+	// Transition from disabled → enforcing: no setenforce, only sed.
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{Target: "selinux/mode", Before: "disabled", After: "enforcing"}
+	if err := m.applyMode(context.Background(), &ch); err != nil {
+		t.Fatal(err)
+	}
+	// No setenforce call.
+	for _, c := range ms.cmds {
+		if strings.Contains(c, "setenforce") {
+			t.Errorf("setenforce should not run when transitioning from disabled; got %v", ms.cmds)
+		}
+	}
+}
+
+func TestSELinuxManager_ApplyMode_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := Change{After: 42}
+	if err := m.applyMode(context.Background(), &ch); err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestSELinuxManager_ApplyBoolean_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	if err := m.applyBoolean(context.Background(), Change{After: "x"}); err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestSELinuxManager_Rollback_NoSession(t *testing.T) {
+	m := NewSELinuxManager()
+	if err := m.Rollback(context.Background(), []Change{{}}); err == nil {
+		t.Error("want err")
+	}
+}
+
+func TestSELinuxManager_Rollback_SkipsNilBefore(t *testing.T) {
+	ms := newMockSession()
+	m := NewSELinuxManager().WithSession(ms)
+	ch := []Change{{Target: "selinux/mode", After: "enforcing"}}
+	if err := m.Rollback(context.Background(), ch); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("should not run any cmds; got %v", ms.cmds)
+	}
+}
+
+func TestSELinuxManager_Run_NoSession(t *testing.T) {
+	m := NewSELinuxManager()
+	if err := m.run(context.Background(), "ls"); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSELinuxManager_Run_ErrWithStderr(t *testing.T) {
+	ms := newMockSession()
+	ms.on("failing-cmd", "", fmt.Errorf("exit 1"))
+	ms.responses["failing-cmd"] = mockResponse{stderr: "nope", err: fmt.Errorf("exit 1")}
+	m := NewSELinuxManager().WithSession(ms)
+	err := m.run(context.Background(), "failing-cmd")
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("want err with stderr, got %v", err)
+	}
+}
+
+func TestSELinuxManager_CastValueSELinuxConfig(t *testing.T) {
+	got, err := castSELinuxConfig(config.SELinuxConfig{Mode: "permissive"})
+	if err != nil || got == nil {
+		t.Errorf("value form: got (%v, %v)", got, err)
+	}
+}
+
+func TestSELinuxManager_CastNilLinuxPointer(t *testing.T) {
+	var l *config.Linux
+	got, err := castSELinuxConfig(l)
+	if err != nil || got != nil {
+		t.Errorf("nil *Linux → nil,nil; got (%v,%v)", got, err)
+	}
+}
+
+func TestSELinuxManager_CastVariants(t *testing.T) {
+	m := NewSELinuxManager().WithSession(newMockSession())
+	_, err := m.Plan(context.Background(), config.Linux{SELinux: &config.SELinuxConfig{Mode: "permissive"}}, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	_, err = m.Plan(context.Background(), &config.Linux{SELinux: &config.SELinuxConfig{Mode: "permissive"}}, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	changes, err := m.Plan(context.Background(), nil, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if changes != nil {
+		t.Error("nil spec → nil changes")
 	}
 }

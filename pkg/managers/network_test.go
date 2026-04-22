@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -134,6 +135,15 @@ func TestNetwork_ApplyHostname(t *testing.T) {
 	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "hostnamectl set-hostname 'new-host'")
 }
 
+func TestNetwork_ApplyHostname_Fails(t *testing.T) {
+	mock := newNetMock()
+	mock.responses = append(mock.responses, fwResp{match: "hostnamectl set-hostname", err: errors.New("denied")})
+	nm := NewNetworkManager().WithSession(mock)
+	changes := []Change{{Target: "hostname", Action: "update", After: "x"}}
+	res, _ := nm.Apply(context.Background(), changes, false)
+	require.Len(t, res.Failed, 1)
+}
+
 func TestNetwork_ApplyResolvConf(t *testing.T) {
 	mock := newNetMock()
 	nm := NewNetworkManager().WithSession(mock)
@@ -206,4 +216,106 @@ func TestNetwork_RenderResolvConfEmpty(t *testing.T) {
 	body := renderResolvConf(nil, nil)
 	require.Contains(t, body, "Managed by linuxctl")
 	require.NotContains(t, body, "nameserver")
+}
+
+func TestNetwork_ApplyNoSession(t *testing.T) {
+	nm := NewNetworkManager()
+	_, err := nm.Apply(context.Background(), []Change{{Target: "hostname"}}, false)
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestNetwork_ApplyOne_HostnameBadType(t *testing.T) {
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock)
+	err := nm.applyOne(context.Background(), Change{Target: "hostname", After: 42})
+	require.Error(t, err)
+}
+
+func TestNetwork_ApplyOne_ResolvBadType(t *testing.T) {
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock)
+	err := nm.applyOne(context.Background(), Change{Target: resolvConfPath, After: "raw string"})
+	require.Error(t, err)
+}
+
+func TestNetwork_ApplyOne_UnknownTarget(t *testing.T) {
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock)
+	err := nm.applyOne(context.Background(), Change{Target: "mystery", After: "x"})
+	require.Error(t, err)
+}
+
+func TestNetwork_RollbackNoSession(t *testing.T) {
+	nm := NewNetworkManager()
+	err := nm.Rollback(context.Background(), []Change{{Target: "hostname"}})
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestNetwork_RollbackNoBeforeSkipped(t *testing.T) {
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock)
+	changes := []Change{
+		{Target: "hostname", After: "new"}, // Before nil → skipped
+		{Target: "hostname", Before: "old", After: "new"},
+	}
+	require.NoError(t, nm.Rollback(context.Background(), changes))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "'old'")
+}
+
+func TestNetwork_CastValueType(t *testing.T) {
+	mock := newNetMock().on("hostname", "x\n")
+	nm := NewNetworkManager().WithSession(mock)
+	_, err := nm.Plan(context.Background(), NetworkSpec{Hostname: "x"}, nil)
+	require.NoError(t, err)
+}
+
+func TestNetwork_WithBackend(t *testing.T) {
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock).WithBackend("systemd-resolved")
+	require.NotNil(t, nm)
+}
+
+func TestNetwork_RenderResolvConfSkipsEmptyServers(t *testing.T) {
+	body := renderResolvConf([]string{"", "1.2.3.4", ""}, nil)
+	require.Contains(t, body, "nameserver 1.2.3.4")
+	// only one nameserver line
+	require.Equal(t, 1, strings.Count(body, "nameserver "))
+}
+
+func TestNetwork_CurrentHostnameErrorFallsBack(t *testing.T) {
+	// Hostname cmd returns nothing, spec hostname "" should mean no change.
+	mock := newNetMock()
+	nm := NewNetworkManager().WithSession(mock)
+	ns := &NetworkSpec{}
+	changes, err := nm.Plan(context.Background(), ns, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes)
+}
+
+// errMockSession forces `hostname` to return an error so currentHostname
+// falls through to hostnamectl.
+type errHostnameSession struct {
+	*netMockSession
+	hostnameCalls int
+}
+
+func (e *errHostnameSession) Run(ctx context.Context, cmd string) (string, string, error) {
+	if strings.Contains(cmd, "hostname") && !strings.Contains(cmd, "hostnamectl") {
+		e.hostnameCalls++
+		return "", "cmd not found", errors.New("no hostname")
+	}
+	if strings.Contains(cmd, "hostnamectl --static") {
+		return "fallback-host\n", "", nil
+	}
+	return e.netMockSession.Run(ctx, cmd)
+}
+
+func TestNetwork_CurrentHostname_FallbackToHostnamectl(t *testing.T) {
+	mock := &errHostnameSession{netMockSession: newNetMock()}
+	nm := NewNetworkManager().WithSession(mock)
+	ns := &NetworkSpec{Hostname: "fallback-host"}
+	changes, err := nm.Plan(context.Background(), ns, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes, "hostnamectl fallback returned the same name")
 }

@@ -273,14 +273,47 @@ func (m *MountManager) Apply(ctx context.Context, changes []Change, dryRun bool)
 	return res, nil
 }
 
+// buildMountCmd is a pure function that assembles the shell command for a
+// single mount Change's After map. It returns the command plus an optional
+// parent-dir mkdir target. Returning ("", "", err) signals an unknown op.
+// It does not handle the "cifs_credentials" op (that path writes a file).
+func buildMountCmd(after map[string]any) (cmd, mkdir string, err error) {
+	op, _ := after["op"].(string)
+	switch op {
+	case "cifs_mount":
+		source, _ := after["source"].(string)
+		mp, _ := after["mountpoint"].(string)
+		opts, _ := after["options"].(string)
+		cred, _ := after["credentials"].(string)
+		mountOpts := combineOpts(opts, "credentials="+cred)
+		return fmt.Sprintf("mount -t cifs -o %s %s %s", shSingleQuote(mountOpts), shSingleQuote(source), shSingleQuote(mp)), mp, nil
+	case "nfs_mount":
+		source, _ := after["source"].(string)
+		mp, _ := after["mountpoint"].(string)
+		opts, _ := after["options"].(string)
+		return fmt.Sprintf("mount -t nfs -o %s %s %s", shSingleQuote(defaultStr(opts, "defaults")), shSingleQuote(source), shSingleQuote(mp)), mp, nil
+	case "tmpfs_mount":
+		mp, _ := after["mountpoint"].(string)
+		opts, _ := after["options"].(string)
+		return fmt.Sprintf("mount -t tmpfs -o %s tmpfs %s", shSingleQuote(defaultStr(opts, "defaults")), shSingleQuote(mp)), mp, nil
+	case "bind_mount":
+		source, _ := after["source"].(string)
+		mp, _ := after["mountpoint"].(string)
+		return fmt.Sprintf("mount --bind %s %s", shSingleQuote(source), shSingleQuote(mp)), mp, nil
+	case "fstab":
+		entry, _ := after["entry"].(string)
+		return fmt.Sprintf("sh -c 'grep -qxF %s /etc/fstab || echo %s >> /etc/fstab'", shSingleQuote(entry), shSingleQuote(entry)), "", nil
+	}
+	return "", "", fmt.Errorf("mount: unknown op %q", op)
+}
+
 func (m *MountManager) applyOne(ctx context.Context, c Change) error {
 	after, ok := c.After.(map[string]any)
 	if !ok {
 		return fmt.Errorf("mount: missing After map")
 	}
 	op, _ := after["op"].(string)
-	switch op {
-	case "cifs_credentials":
+	if op == "cifs_credentials" {
 		path, _ := after["path"].(string)
 		user, _ := after["username"].(string)
 		pass, _ := after["password"].(string)
@@ -289,74 +322,26 @@ func (m *MountManager) applyOne(ctx context.Context, c Change) error {
 			// nothing, skip silently — Apply expects caller to have populated.
 			return nil
 		}
-		// Ensure parent dir exists.
 		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(filepath.Dir(path))); err != nil {
 			return err
 		}
 		content := fmt.Sprintf("username=%s\npassword=%s\n", user, pass)
 		return m.Session.WriteFile(ctx, path, []byte(content), 0o600)
-	case "cifs_mount":
-		source, _ := after["source"].(string)
-		mp, _ := after["mountpoint"].(string)
-		opts, _ := after["options"].(string)
-		cred, _ := after["credentials"].(string)
-		mountOpts := combineOpts(opts, "credentials="+cred)
-		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(mp)); err != nil {
-			return err
-		}
-		cmd := fmt.Sprintf("mount -t cifs -o %s %s %s", shSingleQuote(mountOpts), shSingleQuote(source), shSingleQuote(mp))
-		_, stderr, err := m.Session.RunSudo(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return nil
-	case "nfs_mount":
-		source, _ := after["source"].(string)
-		mp, _ := after["mountpoint"].(string)
-		opts, _ := after["options"].(string)
-		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(mp)); err != nil {
-			return err
-		}
-		cmd := fmt.Sprintf("mount -t nfs -o %s %s %s", shSingleQuote(defaultStr(opts, "defaults")), shSingleQuote(source), shSingleQuote(mp))
-		_, stderr, err := m.Session.RunSudo(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return nil
-	case "tmpfs_mount":
-		mp, _ := after["mountpoint"].(string)
-		opts, _ := after["options"].(string)
-		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(mp)); err != nil {
-			return err
-		}
-		cmd := fmt.Sprintf("mount -t tmpfs -o %s tmpfs %s", shSingleQuote(defaultStr(opts, "defaults")), shSingleQuote(mp))
-		_, stderr, err := m.Session.RunSudo(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return nil
-	case "bind_mount":
-		source, _ := after["source"].(string)
-		mp, _ := after["mountpoint"].(string)
-		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(mp)); err != nil {
-			return err
-		}
-		cmd := fmt.Sprintf("mount --bind %s %s", shSingleQuote(source), shSingleQuote(mp))
-		_, stderr, err := m.Session.RunSudo(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return nil
-	case "fstab":
-		entry, _ := after["entry"].(string)
-		cmd := fmt.Sprintf("sh -c 'grep -qxF %s /etc/fstab || echo %s >> /etc/fstab'", shSingleQuote(entry), shSingleQuote(entry))
-		_, stderr, err := m.Session.RunSudo(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return nil
 	}
-	return fmt.Errorf("mount: unknown op %q", op)
+	cmd, mkdir, err := buildMountCmd(after)
+	if err != nil {
+		return err
+	}
+	if mkdir != "" {
+		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(mkdir)); err != nil {
+			return err
+		}
+	}
+	_, stderr, err := m.Session.RunSudo(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, stderr)
+	}
+	return nil
 }
 
 // Verify replans and reports drift.

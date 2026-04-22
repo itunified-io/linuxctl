@@ -346,6 +346,316 @@ func TestUserManager_Apply_UnknownTarget(t *testing.T) {
 	}
 }
 
+func TestUserManager_Rollback_NoSession(t *testing.T) {
+	u := NewUserManager()
+	if err := u.Rollback(context.Background(), []Change{{Target: "user/x", Action: "create"}}); err == nil {
+		t.Error("want session-required")
+	}
+}
+
+func TestUserManager_Rollback_CreateUserErrStops(t *testing.T) {
+	ms := newMockSession().on("userdel -r", "", fmt.Errorf("busy"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/bob", Action: "create", After: UserSpec{Name: "bob"}}}
+	if err := u.Rollback(context.Background(), changes); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestUserManager_Rollback_GroupDelErr(t *testing.T) {
+	ms := newMockSession().on("groupdel", "", fmt.Errorf("in use"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "group/dev", Action: "create", After: GroupSpec{Name: "dev"}}}
+	if err := u.Rollback(context.Background(), changes); err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestUserManager_Rollback_UpdateSkipsNonMatchingBefore(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	// Before is not a UserSpec → the update rollback should skip silently.
+	changes := []Change{{Target: "user/alice", Action: "update", Before: "string"}}
+	if err := u.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("should skip; got %v", ms.cmds)
+	}
+}
+
+func TestUserManager_Rollback_UpdateNilBeforeSkipped(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update"}}
+	if err := u.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("should skip nil before; got %v", ms.cmds)
+	}
+}
+
+func TestUserManager_ApplyUser_BadAfterType(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	err := u.applyUser(context.Background(), Change{Action: "create", Target: "user/x", After: "wrong"})
+	if err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestUserManager_ApplyGroup_BadAfterType(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	err := u.applyGroup(context.Background(), Change{Action: "create", Target: "group/x", After: "wrong"})
+	if err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestUserManager_ApplyGroup_UpdateZeroGIDNoop(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	ch := Change{Action: "update", Target: "group/x", After: GroupSpec{Name: "x", GID: 0}}
+	if err := u.applyGroup(context.Background(), ch); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("zero GID update should be no-op; got %v", ms.cmds)
+	}
+}
+
+func TestUserManager_ApplyGroup_UnknownAction(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	err := u.applyGroup(context.Background(), Change{Action: "weird", After: GroupSpec{Name: "x"}})
+	if err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestUserManager_ApplyUser_UnknownAction(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	err := u.applyUser(context.Background(), Change{Action: "weird", After: UserSpec{Name: "x"}})
+	if err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestUserManager_Run_NoSession(t *testing.T) {
+	u := NewUserManager()
+	if err := u.run(context.Background(), "ls"); err == nil {
+		t.Error("want error")
+	}
+	_, _, err := u.runOut(context.Background(), "ls")
+	if err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestUserManager_Run_ErrWithStderr(t *testing.T) {
+	ms := newMockSession()
+	ms.on("fail", "", fmt.Errorf("boom"))
+	ms.responses["fail"] = mockResponse{stderr: "oh no", err: fmt.Errorf("boom")}
+	u := NewUserManager().WithSession(ms)
+	err := u.run(context.Background(), "fail")
+	if err == nil || !strings.Contains(err.Error(), "oh no") {
+		t.Errorf("want err with stderr, got %v", err)
+	}
+}
+
+func TestUserManager_CreateUser_SSHKeysFail(t *testing.T) {
+	ms := newMockSession()
+	ms.on("install -d", "", fmt.Errorf("boom"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create",
+		After: UserSpec{Name: "alice", SSHKeys: []string{"ssh-ed25519 x"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestUserManager_CreateUser_PasswordFails(t *testing.T) {
+	ms := newMockSession().on("chpasswd", "", fmt.Errorf("bad hash"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice", Password: "$6$x"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestUserManager_CreateUser_WithPassword(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice", Password: "$6$hash"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("chpasswd -e") {
+		t.Error("expected chpasswd")
+	}
+}
+
+func TestUserManager_CreateUser_UseraddFails(t *testing.T) {
+	ms := newMockSession().on("useradd", "", fmt.Errorf("exists"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "create", After: UserSpec{Name: "alice"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Error("expected failure")
+	}
+}
+
+func TestUserManager_UpdateUser_OnlyHome(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Home: "/data/alice"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("usermod -d") {
+		t.Error("expected usermod -d")
+	}
+}
+
+func TestUserManager_UpdateUser_GIDFails(t *testing.T) {
+	ms := newMockSession().on("usermod -g", "", fmt.Errorf("no such group"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", GID: "missing"}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_GroupsFails(t *testing.T) {
+	ms := newMockSession().on("usermod -G", "", fmt.Errorf("group missing"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Groups: []string{"nope"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_KeysFails(t *testing.T) {
+	ms := newMockSession().on("install -d", "", fmt.Errorf("no home"))
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", SSHKeys: []string{"ssh-ed25519 x"}}}}
+	res, _ := u.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected fail")
+	}
+}
+
+func TestUserManager_UpdateUser_OnlyShell(t *testing.T) {
+	ms := newMockSession()
+	u := NewUserManager().WithSession(ms)
+	changes := []Change{{Target: "user/alice", Action: "update", After: UserSpec{Name: "alice", Shell: "/bin/zsh"}}}
+	if _, err := u.Apply(context.Background(), changes, false); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("usermod -s") {
+		t.Error("expected usermod -s")
+	}
+}
+
+func TestUserManager_GetGroup_Parsing(t *testing.T) {
+	ms := newMockSession().on("getent group 'staff'", "staff:x:1010:alice,bob\n", nil)
+	u := NewUserManager().WithSession(ms)
+	g, err := u.getGroup(context.Background(), "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !g.Exists || g.GID != 1010 || len(g.Members) != 2 {
+		t.Errorf("unexpected: %+v", g)
+	}
+}
+
+func TestUserManager_GetGroup_NotFound(t *testing.T) {
+	ms := newMockSession().on("getent group 'missing'", "", fmt.Errorf("exit 2"))
+	u := NewUserManager().WithSession(ms)
+	g, _ := u.getGroup(context.Background(), "missing")
+	if g.Exists {
+		t.Error("should not exist")
+	}
+}
+
+func TestUserManager_GetGroup_MalformedReturnsMissing(t *testing.T) {
+	ms := newMockSession().on("getent group 'weird'", "junk\n", nil)
+	u := NewUserManager().WithSession(ms)
+	g, _ := u.getGroup(context.Background(), "weird")
+	if g.Exists {
+		t.Error("should not exist for malformed output")
+	}
+}
+
+func TestUserManager_GetUser_MalformedReturnsMissing(t *testing.T) {
+	ms := newMockSession().on("getent passwd 'x'", "short\n", nil)
+	u := NewUserManager().WithSession(ms)
+	_, ok, _ := u.getUser(context.Background(), "x")
+	if ok {
+		t.Error("malformed → not ok")
+	}
+}
+
+func TestUserDrift_AllFields(t *testing.T) {
+	base := currentUser{UID: 1000, Home: "/home/a", Shell: "/bin/bash", Groups: []string{"g"}, SSHKeys: []string{"k1"}}
+	cases := []struct {
+		name  string
+		spec  UserSpec
+		drift bool
+	}{
+		{"no drift", UserSpec{UID: 1000, Home: "/home/a", Shell: "/bin/bash", Groups: []string{"g"}, SSHKeys: []string{"k1"}}, false},
+		{"uid drift", UserSpec{UID: 2000}, true},
+		{"home drift", UserSpec{Home: "/home/b"}, true},
+		{"shell drift", UserSpec{Shell: "/bin/sh"}, true},
+		{"groups drift", UserSpec{Groups: []string{"x"}}, true},
+		{"keys drift", UserSpec{SSHKeys: []string{"k2"}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := userDrift(tc.spec, base); got != tc.drift {
+				t.Errorf("want %v, got %v", tc.drift, got)
+			}
+		})
+	}
+}
+
+func TestSameStringSet(t *testing.T) {
+	if !sameStringSet([]string{"a", "b"}, []string{"b", "a"}) {
+		t.Error("want equal")
+	}
+	if sameStringSet([]string{"a"}, []string{"a", "b"}) {
+		t.Error("want not equal")
+	}
+	if sameStringSet([]string{"a"}, []string{"b"}) {
+		t.Error("want not equal")
+	}
+}
+
+func TestUserManager_OrderKey_AllBranches(t *testing.T) {
+	if orderKey(Change{Target: "group/a", Action: "create"}) != 0 {
+		t.Error("group create")
+	}
+	if orderKey(Change{Target: "group/a", Action: "update"}) != 1 {
+		t.Error("group update")
+	}
+	if orderKey(Change{Target: "user/a", Action: "create"}) != 2 {
+		t.Error("user create")
+	}
+	if orderKey(Change{Target: "user/a", Action: "update"}) != 3 {
+		t.Error("user update")
+	}
+	if orderKey(Change{Target: "user/a", Action: "delete"}) != 4 {
+		t.Error("delete default")
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
 		"plain":      `'plain'`,

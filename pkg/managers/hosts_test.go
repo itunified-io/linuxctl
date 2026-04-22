@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -244,4 +245,118 @@ func TestHosts_MergeRendersMarkers(t *testing.T) {
 	require.Contains(t, merged, hostsBeginMarker)
 	require.Contains(t, merged, hostsEndMarker)
 	require.True(t, strings.HasSuffix(merged, hostsEndMarker+"\n"))
+}
+
+func TestHosts_ApplyNoSession(t *testing.T) {
+	hm := NewHostsManager()
+	_, err := hm.Apply(context.Background(), []Change{{Action: "update", After: ""}}, false)
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestHosts_ApplyBadAction(t *testing.T) {
+	mock := newHostsMock("")
+	hm := NewHostsManager().WithSession(mock)
+	changes := []Change{{Action: "create", After: "x"}}
+	res, err := hm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestHosts_ApplyWrongAfterType(t *testing.T) {
+	mock := newHostsMock("")
+	hm := NewHostsManager().WithSession(mock)
+	changes := []Change{{Action: "update", After: 42}}
+	res, err := hm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestHosts_ApplyReadError(t *testing.T) {
+	mock := newHostsMock("")
+	mock.readErr = errors.New("io err")
+	hm := NewHostsManager().WithSession(mock)
+	changes := []Change{{Action: "update", After: "10.0.0.1 x\n"}}
+	res, _ := hm.Apply(context.Background(), changes, false)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestHosts_ApplyWriteError(t *testing.T) {
+	mock := newHostsMock("127.0.0.1 localhost\n")
+	mock.writeErr = errors.New("disk full")
+	hm := NewHostsManager().WithSession(mock)
+	changes := []Change{{Action: "update", After: "10.0.0.1 x\n"}}
+	res, _ := hm.Apply(context.Background(), changes, false)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestHosts_RollbackNoSession(t *testing.T) {
+	hm := NewHostsManager()
+	err := hm.Rollback(context.Background(), []Change{{Action: "update"}})
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestHosts_RollbackSkipsNonUpdateAndBadBefore(t *testing.T) {
+	mock := newHostsMock("127.0.0.1 localhost\n")
+	hm := NewHostsManager().WithSession(mock)
+	changes := []Change{
+		{Action: "create"},                  // skipped (not update)
+		{Action: "update", Before: 42},      // skipped (not string)
+	}
+	require.NoError(t, hm.Rollback(context.Background(), changes))
+	require.Empty(t, mock.writes)
+}
+
+func TestHosts_RollbackReadError(t *testing.T) {
+	mock := newHostsMock("")
+	mock.readErr = errors.New("io err")
+	hm := NewHostsManager().WithSession(mock)
+	err := hm.Rollback(context.Background(), []Change{{Action: "update", Before: "x\n"}})
+	require.Error(t, err)
+}
+
+func TestHosts_RollbackWriteError(t *testing.T) {
+	mock := newHostsMock("127.0.0.1 localhost\n")
+	mock.writeErr = errors.New("ro fs")
+	hm := NewHostsManager().WithSession(mock)
+	err := hm.Rollback(context.Background(), []Change{{Action: "update", Before: "x\n"}})
+	require.Error(t, err)
+}
+
+func TestHosts_CastValueLinux(t *testing.T) {
+	got, err := castHostEntries(config.Linux{HostsEntries: []config.HostEntry{{IP: "1.2.3.4", Names: []string{"x"}}}})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestHosts_CastNilLinuxPointer(t *testing.T) {
+	var l *config.Linux
+	got, err := castHostEntries(l)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestHosts_CastSliceDirect(t *testing.T) {
+	got, err := castHostEntries([]config.HostEntry{{IP: "1.2.3.4", Names: []string{"x"}}})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestHosts_RenderBlock_Empty(t *testing.T) {
+	require.Equal(t, "", renderBlock(nil))
+}
+
+func TestHosts_RenderBlock_SkipsInvalidEntries(t *testing.T) {
+	got := renderBlock([]config.HostEntry{
+		{IP: "", Names: []string{"a"}},     // missing IP
+		{IP: "1.2.3.4", Names: nil},        // missing names
+		{IP: "10.0.0.1", Names: []string{"foo"}},
+	})
+	require.Equal(t, "10.0.0.1  foo\n", got)
+}
+
+func TestHosts_Verify_PlanError(t *testing.T) {
+	mock := newHostsMock("")
+	hm := NewHostsManager().WithSession(mock)
+	_, err := hm.Verify(context.Background(), 42)
+	require.Error(t, err)
 }

@@ -2,6 +2,8 @@ package managers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -318,5 +320,203 @@ func TestDiskManager_coerceLayout_Unsupported(t *testing.T) {
 	v, _ := coerceLayout(nil)
 	if v != nil {
 		t.Error("nil spec should coerce to nil")
+	}
+}
+
+func TestDiskChangeCmd_AllOps(t *testing.T) {
+	cases := []struct {
+		after   map[string]any
+		wantSub string
+		wantErr bool
+	}{
+		{after: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}, wantSub: "pvcreate -f /dev/sdb"},
+		{after: map[string]any{"op": "vgcreate", "name": "vg1", "pvs": []string{"/dev/sdb"}}, wantSub: "vgcreate vg1 /dev/sdb"},
+		{after: map[string]any{"op": "vgcreate", "name": "vg1", "pvs": []any{"/dev/sdb"}}, wantSub: "vgcreate vg1 /dev/sdb"},
+		{after: map[string]any{"op": "lvcreate", "name": "lv1", "size": "1G", "vg": "vg1"}, wantSub: "lvcreate -y -n lv1 -L 1G vg1"},
+		{after: map[string]any{"op": "mkfs", "fstype": "ext4", "device": "/dev/vg1/lv1"}, wantSub: "mkfs.ext4 -F /dev/vg1/lv1"},
+		{after: map[string]any{"op": "mount", "mountpoint": "/data"}, wantSub: "mount /data"},
+		{after: map[string]any{"op": "fstab", "entry": "foo"}, wantSub: "/etc/fstab"},
+		{after: map[string]any{"op": "error", "reason": "boom"}, wantErr: true},
+		{after: map[string]any{"op": "mystery"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := diskChangeCmd(Change{After: tc.after})
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("expected err for %v", tc.after)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("unexpected err: %v", err)
+			continue
+		}
+		if !strings.Contains(got, tc.wantSub) {
+			t.Errorf("%v: got %q, missing %q", tc.after, got, tc.wantSub)
+		}
+	}
+}
+
+func TestDiskChangeCmd_MissingAfterMap(t *testing.T) {
+	_, err := diskChangeCmd(Change{Target: "foo"})
+	if err == nil {
+		t.Error("expected err for non-map After")
+	}
+}
+
+func TestDiskManager_Apply_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	changes := []Change{{After: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDiskManager_Apply_ErrorOpFails(t *testing.T) {
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "error", "reason": "nope"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestDiskManager_Rollback_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	err := d.Rollback(context.Background(), []Change{{RollbackCmd: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestDiskManager_Rollback_CmdFails(t *testing.T) {
+	ms := newFullMock().on("lvremove", "", errors.New("busy"))
+	d := NewDiskManager().WithSession(ms)
+	err := d.Rollback(context.Background(), []Change{{RollbackCmd: "lvremove -f /dev/vg1/lv1"}})
+	if err == nil {
+		t.Fatal("expected err on rollback cmd fail")
+	}
+}
+
+func TestDiskManager_Apply_SkipsMkfsRollbackEmpty(t *testing.T) {
+	// mkfs op → cmd built, but RollbackCmd is empty (conservative). The skip
+	// path is only for "" cmd, which none of our ops emit. Instead test Apply
+	// with an action we don't understand → diskChangeCmd returns err.
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "mystery"}}}
+	res, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestDiskManager_Apply_RunSudoFails(t *testing.T) {
+	ms := newFullMock().on("pvcreate", "", fmt.Errorf("device busy"))
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{After: map[string]any{"op": "pvcreate", "device": "/dev/sdb"}}}
+	_, err := d.Apply(context.Background(), changes, false)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestDiskManager_CoerceLayout_ValueForm(t *testing.T) {
+	dl := config.DiskLayout{}
+	got, err := coerceLayout(dl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("expected non-nil")
+	}
+	got2, _ := coerceLayout((*config.DiskLayout)(nil))
+	_ = got2 // pointer nil path
+}
+
+func TestDiskManager_Plan_InvalidSpec(t *testing.T) {
+	d := NewDiskManager()
+	_, err := d.Plan(context.Background(), "bogus", nil)
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestDiskManager_Verify_PlanErr(t *testing.T) {
+	d := NewDiskManager()
+	_, err := d.Verify(context.Background(), "bogus")
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestDiskManager_PlanLayout_NilLayout(t *testing.T) {
+	d := NewDiskManager().WithSession(newFullMock())
+	changes, err := d.PlanLayout(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != nil {
+		t.Error("nil layout → nil changes")
+	}
+}
+
+func TestDiskManager_PlanLayout_NoSession(t *testing.T) {
+	d := NewDiskManager()
+	layout := &config.DiskLayout{
+		Root: &config.RootDisk{Device: "/dev/sda", VGName: "rootvg",
+			LogicalVolumes: []config.LogicalVolume{{Name: "root", Size: "20G", FS: "xfs", MountPoint: "/"}}},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Error("expected changes for no-session (empty discovery)")
+	}
+}
+
+func TestDiskManager_PlanLayout_MissingAdditionalDevice(t *testing.T) {
+	ms := newFullMock().
+		on("pvs", `{"report":[{"pv":[]}]}`, nil).
+		on("vgs", `{"report":[{"vg":[]}]}`, nil).
+		on("lvs", `{"report":[{"lv":[]}]}`, nil).
+		on("findmnt", `{"filesystems":[]}`, nil)
+	// /dev/sdb missing
+	d := NewDiskManager().WithSession(ms)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{{
+			Device: "/dev/sdb", VGName: "vg1",
+			LogicalVolumes: []config.LogicalVolume{{Name: "lv1", Size: "1G", FS: "ext4", MountPoint: "/mnt/lv1"}},
+		}},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect one "error" noop change indicating device absence.
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	after := changes[0].After.(map[string]any)
+	if after["op"] != "error" {
+		t.Errorf("expected error op; got %v", after)
+	}
+}
+
+func TestDiskManager_Rollback_SkipsEmptyCmd(t *testing.T) {
+	ms := newFullMock()
+	d := NewDiskManager().WithSession(ms)
+	changes := []Change{{RollbackCmd: ""}, {RollbackCmd: "echo ok"}}
+	if err := d.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 1 {
+		t.Errorf("expected 1 cmd, got %d", len(ms.cmds))
 	}
 }

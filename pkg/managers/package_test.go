@@ -273,6 +273,13 @@ func TestPackageManager_CastPackages(t *testing.T) {
 	if _, err := castPackages(42); err == nil {
 		t.Error("wrong type must fail")
 	}
+	if _, err := castPackages(PackagesSpec{Install: []string{"x"}}); err != nil {
+		t.Errorf("value form: %v", err)
+	}
+	var np *PackagesSpec
+	if _, err := castPackages(np); err != nil {
+		t.Errorf("nil pointer: %v", err)
+	}
 }
 
 func TestPackageManager_Rollback_Delete(t *testing.T) {
@@ -297,6 +304,208 @@ func TestPackageManager_NoSession(t *testing.T) {
 	_, err = p.Apply(context.Background(), []Change{{Action: "create", After: "x"}}, false)
 	if err == nil {
 		t.Error("expected error without session")
+	}
+}
+
+func TestPackageManager_DetectDistro_RHEL7_YumFallback(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", `ID="rhel"
+VERSION_ID="7.9"
+`, nil).
+		on("command -v dnf", "", fmt.Errorf("not found")) // no dnf → yum
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "yum" {
+		t.Errorf("want yum, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_SLES(t *testing.T) {
+	ms := newMockSession().on("cat /etc/os-release", `ID="sles"
+`, nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "zypper" {
+		t.Errorf("want zypper, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_FromIDLike(t *testing.T) {
+	// Primary ID is unknown but ID_LIKE lists ubuntu.
+	ms := newMockSession().on("cat /etc/os-release", `ID="linuxmint"
+ID_LIKE="ubuntu debian"
+`, nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.tool != "apt-get" {
+		t.Errorf("want apt-get, got %q", p.tool)
+	}
+}
+
+func TestPackageManager_DetectDistro_Rocky(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", `ID="rocky"
+ID_LIKE="rhel fedora centos"
+`, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	if err := p.detectDistro(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p.family != familyRPM {
+		t.Errorf("want familyRPM, got %q", p.family)
+	}
+}
+
+func TestPackageManager_Rollback_NoSession(t *testing.T) {
+	p := NewPackageManager()
+	err := p.Rollback(context.Background(), []Change{{Action: "create", After: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestPackageManager_Rollback_DetectFails(t *testing.T) {
+	ms := newMockSession().on("cat /etc/os-release", "ID=plan9\n", nil)
+	p := NewPackageManager().WithSession(ms)
+	err := p.Rollback(context.Background(), []Change{{Action: "create", After: "x"}})
+	if err == nil {
+		t.Fatal("expected err")
+	}
+}
+
+func TestPackageManager_Apply_UnknownAction(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	res, _ := p.Apply(context.Background(), []Change{{Action: "weird", After: "x"}}, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed, got %d", len(res.Failed))
+	}
+}
+
+func TestPackageManager_Apply_InstallFails(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil).
+		on("dnf install", "", fmt.Errorf("no such package"))
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{{Action: "create", After: "nosuch"}}
+	res, _ := p.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed")
+	}
+}
+
+func TestPackageManager_Apply_RemoveBatched(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil)
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{
+		{Action: "delete", Before: "a"},
+		{Action: "delete", Before: "b"},
+	}
+	res, err := p.Apply(context.Background(), changes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 2 {
+		t.Errorf("expected 2 applied")
+	}
+}
+
+func TestPackageManager_Apply_RemoveFails(t *testing.T) {
+	ms := newMockSession().
+		on("cat /etc/os-release", osReleaseOL9, nil).
+		on("command -v dnf", "", nil).
+		on("dnf remove", "", fmt.Errorf("locked"))
+	p := NewPackageManager().WithSession(ms)
+	changes := []Change{{Action: "delete", Before: "x"}}
+	res, _ := p.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected 1 failed; got %+v", res)
+	}
+}
+
+func TestPackageManager_Apply_EmptyChanges(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	res, err := p.Apply(context.Background(), nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 {
+		t.Error("expected no applied")
+	}
+}
+
+func TestPackageManager_RunPackageOp_Zypper(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyZYPPER
+	p.tool = "zypper"
+	if err := p.runPackageOp(context.Background(), "install", []string{"nginx"}); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("zypper --non-interactive install") {
+		t.Errorf("expected zypper install; got %v", ms.cmds)
+	}
+	ms2 := newMockSession()
+	p2 := NewPackageManager().WithSession(ms2)
+	p2.family = familyZYPPER
+	p2.tool = "zypper"
+	if err := p2.runPackageOp(context.Background(), "remove", []string{"nginx"}); err != nil {
+		t.Fatal(err)
+	}
+	if !ms2.ranContaining("remove --no-confirm") {
+		t.Errorf("expected zypper remove; got %v", ms2.cmds)
+	}
+}
+
+func TestPackageManager_RunPackageOp_UnknownFamily(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = "weird"
+	err := p.runPackageOp(context.Background(), "install", []string{"x"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestPackageManager_RunPackageOp_EmptyNames(t *testing.T) {
+	ms := newMockSession()
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyRPM
+	p.tool = "dnf"
+	if err := p.runPackageOp(context.Background(), "install", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Error("should not run cmd")
+	}
+}
+
+func TestPackageManager_RunPackageOp_FatalNonLockError(t *testing.T) {
+	ms := newMockSession().on("dnf install", "", fmt.Errorf("kaboom"))
+	ms.responses["dnf install"] = mockResponse{stderr: "permission denied", err: fmt.Errorf("kaboom")}
+	p := NewPackageManager().WithSession(ms)
+	p.family = familyRPM
+	p.tool = "dnf"
+	err := p.runPackageOp(context.Background(), "install", []string{"x"})
+	if err == nil {
+		t.Error("expected err")
+	}
+	// Should have only attempted once (not a lock error).
+	if len(ms.cmds) != 1 {
+		t.Errorf("expected 1 attempt, got %d", len(ms.cmds))
 	}
 }
 

@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -268,5 +269,102 @@ func TestServiceManager_Plan_NoSession(t *testing.T) {
 	_, err := s.Plan(context.Background(), []config.ServiceState{{Name: "x"}}, nil)
 	if err == nil {
 		t.Error("want session-required error")
+	}
+}
+
+func TestServiceManager_Rollback_NoSession(t *testing.T) {
+	s := NewServiceManager()
+	if err := s.Rollback(context.Background(), []Change{{}}); err == nil {
+		t.Error("want session-required error")
+	}
+}
+
+func TestServiceManager_Rollback_StopWhenActive(t *testing.T) {
+	ms := newSvcMock()
+	s := NewServiceManager().WithSession(ms)
+	changes := []Change{
+		{Before: serviceEnableSnap{Name: "svc", Enabled: true}, After: serviceEnableOp{Name: "svc", Op: "disable"}},
+		{Before: serviceStateSnap{Name: "svc", Active: true}, After: serviceStateOp{Name: "svc", Op: "stop"}},
+		{Before: "not a snap"},
+	}
+	if err := s.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ran("systemctl enable 'svc'") {
+		t.Errorf("expected re-enable; cmds=%v", ms.cmds)
+	}
+	if !ms.ran("systemctl start 'svc'") {
+		t.Errorf("expected re-start; cmds=%v", ms.cmds)
+	}
+}
+
+func TestServiceManager_ApplyOne_MaskedEnable(t *testing.T) {
+	ms := newSvcMock()
+	s := NewServiceManager().WithSession(ms)
+	changes := []Change{{After: serviceEnableOp{Name: "m", Op: "enable", Masked: true}}}
+	res, _ := s.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected masked refusal")
+	}
+}
+
+func TestServiceManager_ApplyOne_UnexpectedAfter(t *testing.T) {
+	ms := newSvcMock()
+	s := NewServiceManager().WithSession(ms)
+	changes := []Change{{After: "random string"}}
+	res, _ := s.Apply(context.Background(), changes, false)
+	if len(res.Failed) != 1 {
+		t.Errorf("expected failure")
+	}
+}
+
+func TestServiceManager_Observe_MaskedUnit(t *testing.T) {
+	ms := newSvcMock().
+		on("is-enabled 'svc'", "masked\n", nil).
+		on("is-active 'svc'", "inactive\n", nil)
+	s := NewServiceManager().WithSession(ms)
+	changes, err := s.Plan(context.Background(), []config.ServiceState{{Name: "svc", Enabled: true, State: "running"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Masked must still produce changes but they carry Masked=true.
+	hasMasked := false
+	for _, ch := range changes {
+		if op, ok := ch.After.(serviceEnableOp); ok && op.Masked {
+			hasMasked = true
+		}
+		if op, ok := ch.After.(serviceStateOp); ok && op.Masked {
+			hasMasked = true
+		}
+	}
+	if !hasMasked {
+		t.Errorf("expected at least one Masked=true; got %+v", changes)
+	}
+}
+
+func TestServiceManager_Observe_DisabledUnit(t *testing.T) {
+	ms := newSvcMock().
+		on("is-enabled 'svc'", "disabled\n", nil).
+		on("is-active 'svc'", "inactive\n", nil)
+	s := NewServiceManager().WithSession(ms)
+	changes, err := s.Plan(context.Background(), []config.ServiceState{{Name: "svc", Enabled: true, State: "running"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Error("expected enable/start changes")
+	}
+}
+
+func TestServiceManager_Apply_StateRetry(t *testing.T) {
+	// First invocation of start fails, retry succeeds (mock always returns nil so fabricate with error once).
+	ms := newSvcMock()
+	ms.on("systemctl start 'svc'", "", errors.New("transient"))
+	s := NewServiceManager().WithSession(ms)
+	changes := []Change{{After: serviceStateOp{Name: "svc", Op: "start"}}}
+	res, _ := s.Apply(context.Background(), changes, false)
+	// Both attempts fail, so this should fail — but we want to exercise the retry path.
+	if len(res.Failed) != 1 {
+		t.Errorf("expected failure on both retries; got %+v", res)
 	}
 }

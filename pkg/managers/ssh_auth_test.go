@@ -312,3 +312,159 @@ func TestSetupClusterSSH_NoUsers(t *testing.T) {
 		t.Error("expected error with no users")
 	}
 }
+
+func TestSSHManager_Rollback_NoSession(t *testing.T) {
+	m := NewSSHAuthManager()
+	if err := m.Rollback(context.Background(), []Change{{}}); err == nil {
+		t.Error("want error")
+	}
+}
+
+func TestSSHManager_Rollback_RestoresAuthKeys(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	changes := []Change{{
+		Target: "authorized_keys/grid",
+		Before: []string{"ssh-ed25519 AAA old"},
+		After:  []string{"ssh-ed25519 AAA new"},
+	}}
+	if err := m.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("authorized_keys") {
+		t.Error("expected authorized_keys restore")
+	}
+}
+
+func TestSSHManager_Rollback_NilBeforeSkipped(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	changes := []Change{{Target: "authorized_keys/alice"}}
+	if err := m.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(ms.cmds) != 0 {
+		t.Errorf("should not run cmds; got %v", ms.cmds)
+	}
+}
+
+func TestSSHManager_Rollback_SSHDDropInRemove(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	changes := []Change{{Target: "sshd_config/drop-in", After: map[string]string{"PasswordAuthentication": "no"}}}
+	if err := m.Rollback(context.Background(), changes); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.ranContaining("rm -f") {
+		t.Errorf("expected rm -f; got %v", ms.cmds)
+	}
+}
+
+func TestSSHManager_ReadAuthorizedKeys_NoSession(t *testing.T) {
+	m := NewSSHAuthManager()
+	keys, err := m.readAuthorizedKeys(context.Background(), "alice")
+	if err != nil || keys != nil {
+		t.Errorf("no session → nil,nil; got (%v,%v)", keys, err)
+	}
+}
+
+func TestSSHManager_ReadAuthorizedKeys_Root(t *testing.T) {
+	ms := newMockSession().on("/root/.ssh/authorized_keys", "ssh-ed25519 AAA root@host\n# comment\n", nil)
+	m := NewSSHAuthManager().WithSession(ms)
+	keys, err := m.readAuthorizedKeys(context.Background(), "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 {
+		t.Errorf("expected 1 key (comments stripped), got %v", keys)
+	}
+}
+
+func TestSSHManager_ReadSSHDDropIn_NoSession(t *testing.T) {
+	m := NewSSHAuthManager()
+	out, err := m.readSSHDDropIn(context.Background())
+	if err != nil || len(out) != 0 {
+		t.Errorf("no session → empty,nil; got (%v,%v)", out, err)
+	}
+}
+
+func TestSSHManager_Run_NoSession(t *testing.T) {
+	m := NewSSHAuthManager()
+	if err := m.run(context.Background(), "ls"); err == nil {
+		t.Error("want err")
+	}
+}
+
+func TestSSHManager_Run_ErrWithStderr(t *testing.T) {
+	ms := newMockSession()
+	ms.on("boom", "", fmt.Errorf("x"))
+	ms.responses["boom"] = mockResponse{stderr: "oh no", err: fmt.Errorf("x")}
+	m := NewSSHAuthManager().WithSession(ms)
+	err := m.run(context.Background(), "boom")
+	if err == nil || !strings.Contains(err.Error(), "oh no") {
+		t.Errorf("want err with stderr, got %v", err)
+	}
+}
+
+func TestSSHManager_ApplyAuthorizedKeys_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	err := m.applyAuthorizedKeys(context.Background(), Change{Target: "authorized_keys/alice", After: "wrong"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_BadType(t *testing.T) {
+	ms := newMockSession()
+	m := NewSSHAuthManager().WithSession(ms)
+	err := m.applySSHDConfig(context.Background(), Change{After: "wrong"})
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_SSHDValidationFails(t *testing.T) {
+	ms := newMockSession().on("sshd -t", "", fmt.Errorf("bad config"))
+	m := NewSSHAuthManager().WithSession(ms)
+	ch := Change{Target: "sshd_config/drop-in", After: map[string]string{"PasswordAuthentication": "no"}}
+	err := m.applySSHDConfig(context.Background(), ch)
+	if err == nil {
+		t.Error("expected err")
+	}
+	// Should roll back: rm -f the drop-in.
+	if !ms.ranContaining("rm -f") {
+		t.Errorf("expected rm -f on sshd -t failure; got %v", ms.cmds)
+	}
+}
+
+func TestSSHManager_ApplySSHDConfig_WriteFails(t *testing.T) {
+	ms := newMockSession().on("install -d -m 0755", "", fmt.Errorf("ro fs"))
+	m := NewSSHAuthManager().WithSession(ms)
+	ch := Change{Target: "sshd_config/drop-in", After: map[string]string{"X": "y"}}
+	err := m.applySSHDConfig(context.Background(), ch)
+	if err == nil {
+		t.Error("expected err")
+	}
+}
+
+func TestSSHManager_CastVariants(t *testing.T) {
+	m := NewSSHAuthManager().WithSession(newMockSession())
+	cfg := config.SSHConfig{}
+	if _, err := m.Plan(context.Background(), cfg, nil); err != nil {
+		t.Error(err)
+	}
+	if _, err := m.Plan(context.Background(), &cfg, nil); err != nil {
+		t.Error(err)
+	}
+	if _, err := m.Plan(context.Background(), nil, nil); err != nil {
+		t.Error(err)
+	}
+	if _, err := m.Plan(context.Background(), config.Linux{SSHConfig: &cfg}, nil); err != nil {
+		t.Error(err)
+	}
+	var np *config.Linux
+	if _, err := m.Plan(context.Background(), np, nil); err != nil {
+		t.Error(err)
+	}
+}

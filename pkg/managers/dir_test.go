@@ -2,6 +2,7 @@ package managers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -226,4 +227,124 @@ func TestDir_Registered(t *testing.T) {
 
 func TestDir_InterfaceCompliance(t *testing.T) {
 	var _ Manager = NewDirManager()
+}
+
+func TestDir_ApplyAfterWrongType(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "create", After: "not a Directory"}}
+	res, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestDir_ApplyUnknownAction(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "weird", After: config.Directory{Path: "/x"}}}
+	res, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+}
+
+func TestDir_CastFromValueLinux(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	l := config.Linux{Directories: []config.Directory{{Path: "/opt/x"}}}
+	changes, err := dm.Plan(context.Background(), l, nil)
+	require.NoError(t, err)
+	require.Len(t, changes, 1)
+}
+
+func TestDir_CastNilLinux(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	var l *config.Linux
+	changes, err := dm.Plan(context.Background(), l, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes)
+}
+
+func TestDir_Rollback_SkipNonDirectoryAfter(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	changes := []Change{{Action: "create", After: "not a Directory"}}
+	require.NoError(t, dm.Rollback(context.Background(), changes))
+	require.Empty(t, mock.sudoRuns)
+}
+
+func TestDir_ApplyAttrs_ChownNoRecurse(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	d := config.Directory{Path: "/a", Owner: "u"}
+	changes := []Change{{Action: "update", After: d}}
+	_, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "chown 'u'")
+	require.NotContains(t, joined, "chmod")
+}
+
+func TestDirDrift_AllCombinations(t *testing.T) {
+	cur := currentDir{Exists: true, Owner: "u", Group: "g", Mode: "0755"}
+	cases := []struct {
+		name  string
+		d     config.Directory
+		drift bool
+	}{
+		{"no drift", config.Directory{Owner: "u", Group: "g", Mode: "0755"}, false},
+		{"owner drift", config.Directory{Owner: "other"}, true},
+		{"group drift", config.Directory{Group: "other"}, true},
+		{"mode drift", config.Directory{Mode: "0700"}, true},
+		{"empty spec no drift", config.Directory{}, false},
+	}
+	for _, tc := range cases {
+		if got := dirDrift(tc.d, cur); got != tc.drift {
+			t.Errorf("%s: want %v, got %v", tc.name, tc.drift, got)
+		}
+	}
+}
+
+func TestDir_Stat_SudoFallback(t *testing.T) {
+	mock := newDirMockSession()
+	mock.exists["/root/secret"] = true
+	firstCall := 0
+	mock.handler = func(cmd string, sudo bool) (string, string, error) {
+		if strings.HasPrefix(cmd, "stat -c") {
+			if !sudo {
+				firstCall++
+				return "", "Permission denied", errors.New("denied")
+			}
+			return "root root 700\n", "", nil
+		}
+		return "", "", nil
+	}
+	dm := NewDirManager().WithSession(mock)
+	d, err := dm.stat(context.Background(), "/root/secret")
+	require.NoError(t, err)
+	require.True(t, d.Exists)
+	require.Equal(t, "0700", d.Mode)
+	require.Equal(t, 1, firstCall, "non-sudo should have been tried once")
+}
+
+func TestDir_Stat_MalformedOutput(t *testing.T) {
+	mock := newDirMockSession()
+	mock.exists["/x"] = true
+	mock.handler = func(cmd string, _ bool) (string, string, error) {
+		return "garbage\n", "", nil
+	}
+	dm := NewDirManager().WithSession(mock)
+	_, err := dm.stat(context.Background(), "/x")
+	require.Error(t, err)
+}
+
+func TestDir_ApplyAttrs_GroupOnly(t *testing.T) {
+	mock := newDirMockSession()
+	dm := NewDirManager().WithSession(mock)
+	d := config.Directory{Path: "/a", Group: "g"}
+	changes := []Change{{Action: "update", After: d}}
+	_, err := dm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "chown ':g'")
 }

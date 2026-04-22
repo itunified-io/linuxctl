@@ -4,6 +4,24 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.4 — 2026-04-19
+
+### Tests — coverage hardening to ≥95% (#5)
+
+| Package | Before | After | Delta |
+|---------|--------|-------|-------|
+| pkg/config | 78.3% | **97.4%** | +19.1pp |
+| pkg/session | 20.2% | **91.8%** | +71.6pp |
+| pkg/apply | 78.4% | **97.7%** | +19.3pp |
+| pkg/managers (13 managers) | 77.1% | **95.0%** | +17.9pp |
+
+- ~135 new tests across 4 packages; no public API changes
+- **pkg/session: in-process SSH test server** using `gliderlabs/ssh` (ed25519 keys + rejects counter for retry tests); covers Run/RunSudo/WriteFile/ReadFile/FileExists/host-key/timeout/retry
+- **pkg/managers**: DependsOn table-driven test for all 13 managers; ufw firewall backend now exercised; mount.applyOne refactored — pure `buildMountCmd` extracted for testability; every manager's Rollback error paths tested; distro detection fallback chain (RHEL7/SLES/Rocky/Alma/Mint via ID_LIKE)
+- **pkg/apply**: orchestrator dependency-order invocation, continue-on-error, Rollback reverse order, unregistered-manager error, dry-run propagation
+- Minor bug fix in `pkg/session/ssh.go`: renamed shadowing helper `net()` → `joinHostPort()`
+- `pkg/license` (80.0%) and `internal/root` (38.0%) remain below 95% — CLI wiring tests are Phase 5 scope (integration tests)
+
 ## v2026.04.11.3 — 2026-04-19
 
 ### Added — Phase 4: 8 remaining managers + full 13-manager orchestrator (#3)
