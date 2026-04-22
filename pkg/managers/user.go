@@ -3,9 +3,13 @@ package managers
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/itunified-io/linuxctl/pkg/config"
+	"github.com/itunified-io/linuxctl/pkg/presets"
 )
 
 // SessionRunner is the minimal command-execution contract that the User and
@@ -526,9 +530,9 @@ func (m *UserManager) runOut(ctx context.Context, cmd string) (string, string, e
 	return m.sess.Run(ctx, cmd)
 }
 
-// castUsersGroups accepts either the concrete typed spec or a generic map
-// (unmarshaled YAML). It keeps the manager forward-compatible with whatever
-// representation pkg/config ends up settling on.
+// castUsersGroups accepts either the concrete typed spec, *config.Linux,
+// or a generic map (unmarshaled YAML). When a *config.Linux carries a
+// UsersGroupsPreset, the preset is merged with explicit entries.
 func castUsersGroups(desired Spec) (UsersGroupsSpec, error) {
 	switch v := desired.(type) {
 	case UsersGroupsSpec:
@@ -538,11 +542,57 @@ func castUsersGroups(desired Spec) (UsersGroupsSpec, error) {
 			return UsersGroupsSpec{}, nil
 		}
 		return *v, nil
+	case *config.Linux:
+		if v == nil {
+			return UsersGroupsSpec{}, nil
+		}
+		return usersGroupsFromLinux(v), nil
+	case config.Linux:
+		return usersGroupsFromLinux(&v), nil
 	case nil:
 		return UsersGroupsSpec{}, nil
 	default:
 		return UsersGroupsSpec{}, fmt.Errorf("user: unsupported desired-state type %T", desired)
 	}
+}
+
+// usersGroupsFromLinux converts the config.Linux users_groups block into the
+// manager's UsersGroupsSpec shape, applying preset merging if
+// UsersGroupsPreset is set.
+func usersGroupsFromLinux(l *config.Linux) UsersGroupsSpec {
+	explicit := config.UsersGroups{}
+	if l.UsersGroups != nil {
+		explicit = *l.UsersGroups
+	}
+	merged := explicit
+	if l.UsersGroupsPreset != "" {
+		if p, err := presets.ResolveCategory("users_groups", l.UsersGroupsPreset, nil); err == nil {
+			if pug, err := presets.UsersGroupsSpec(p); err == nil && pug != nil {
+				merged = presets.MergeUsersGroups(explicit, *pug)
+			} else if err != nil {
+				log.Printf("user: preset %q decode: %v", l.UsersGroupsPreset, err)
+			}
+		} else {
+			log.Printf("user: preset %q: %v", l.UsersGroupsPreset, err)
+		}
+	}
+	out := UsersGroupsSpec{}
+	for _, g := range merged.Groups {
+		out.Groups = append(out.Groups, GroupSpec{Name: g.Name, GID: g.GID})
+	}
+	for _, u := range merged.Users {
+		out.Users = append(out.Users, UserSpec{
+			Name:     u.Name,
+			UID:      u.UID,
+			GID:      u.GID,
+			Groups:   u.Groups,
+			Home:     u.Home,
+			Shell:    u.Shell,
+			SSHKeys:  u.SSHKeys,
+			Password: u.Password,
+		})
+	}
+	return out
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quote.

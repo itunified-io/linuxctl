@@ -104,8 +104,9 @@ func TestSysctl_PresetExpansion(t *testing.T) {
 			t.Errorf("preset missing %q", req)
 		}
 	}
-	if got := presetSysctl("pg-16"); got != nil {
-		t.Errorf("pg-16 should stub to nil, got %d entries", len(got))
+	// pg-16 now ships real content via the conventions library (plan 033).
+	if got := presetSysctl("pg-16"); len(got) == 0 {
+		t.Errorf("pg-16 should now be populated (plan 033), got %d entries", len(got))
 	}
 	if got := presetSysctl("unknown"); got != nil {
 		t.Errorf("unknown should be nil, got %v", got)

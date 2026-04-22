@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/itunified-io/linuxctl/pkg/config"
+	"github.com/itunified-io/linuxctl/pkg/presets"
 	"github.com/itunified-io/linuxctl/pkg/session"
 )
 
@@ -40,33 +41,24 @@ func init() { Register(NewSysctlManager()) }
 
 // ---- Preset expansion ------------------------------------------------------
 
-// presetSysctl returns the hardcoded sysctl entries for a named preset. Returns
-// nil + false when the preset is unknown. The Oracle 19c preset ships with
-// published Oracle RDBMS pre-install kernel params.
+// presetSysctl resolves a named sysctl preset via the pkg/presets registry.
+// Unknown / business-gated presets return nil + log; the manager then
+// proceeds with only the explicit entries (if any).
 func presetSysctl(name string) []config.SysctlEntry {
-	switch name {
-	case "":
-		return nil
-	case "oracle-19c":
-		return []config.SysctlEntry{
-			{Key: "fs.aio-max-nr", Value: "1048576"},
-			{Key: "fs.file-max", Value: "6815744"},
-			{Key: "kernel.panic_on_oops", Value: "1"},
-			{Key: "kernel.sem", Value: "250 32000 100 128"},
-			{Key: "kernel.shmall", Value: "1073741824"},
-			{Key: "kernel.shmmax", Value: "4398046511104"},
-			{Key: "kernel.shmmni", Value: "4096"},
-			{Key: "net.core.rmem_max", Value: "4194304"},
-			{Key: "net.core.wmem_max", Value: "1048576"},
-			{Key: "vm.swappiness", Value: "10"},
-		}
-	case "pg-16", "hardened-cis":
-		log.Printf("sysctl: preset %q not yet populated; Phase 4b", name)
-		return nil
-	default:
-		log.Printf("sysctl: unknown preset %q", name)
+	if name == "" {
 		return nil
 	}
+	p, err := presets.ResolveCategory("sysctl", name, nil)
+	if err != nil {
+		log.Printf("sysctl: preset %q: %v", name, err)
+		return nil
+	}
+	entries, err := presets.SysctlSpec(p)
+	if err != nil {
+		log.Printf("sysctl: preset %q decode: %v", name, err)
+		return nil
+	}
+	return entries
 }
 
 // mergeSysctl merges explicit entries with a preset's entries. Explicit wins
