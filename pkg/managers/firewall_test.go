@@ -277,3 +277,258 @@ ID_LIKE="ubuntu debian"
 	require.Equal(t, "linuxmint", id)
 	require.Contains(t, idLike, "ubuntu")
 }
+
+// ---- UFW backend ----------------------------------------------------------
+
+func TestFirewall_UFW_ParseStatusActive(t *testing.T) {
+	body := `Status: active
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW       Anywhere
+443/tcp                    ALLOW       Anywhere
+`
+	cf := currentFirewall{Ports: map[string][]string{}, Sources: map[string][]string{}}
+	parseUFWStatus(body, &cf)
+	require.True(t, cf.Active)
+	require.ElementsMatch(t, []string{"22/tcp", "443/tcp"}, cf.Ports["default"])
+}
+
+func TestFirewall_UFW_ParseStatusInactive(t *testing.T) {
+	cf := currentFirewall{Ports: map[string][]string{}, Sources: map[string][]string{}}
+	parseUFWStatus("Status: inactive\n", &cf)
+	require.False(t, cf.Active)
+	require.Empty(t, cf.Ports["default"])
+}
+
+func TestFirewall_UFW_Snapshot(t *testing.T) {
+	mock := newFWMock().on("ufw status verbose", "Status: active\n22/tcp ALLOW Anywhere\n")
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	cf, err := fm.snapshot(context.Background())
+	require.NoError(t, err)
+	require.True(t, cf.Active)
+	require.Contains(t, cf.Ports["default"], "22/tcp")
+}
+
+func TestFirewall_UFW_PlanFreshMachine(t *testing.T) {
+	// Fresh Ubuntu: ufw inactive, desired enabled with ports. Expect enable + add_port.
+	mock := newFWMock().on("ufw status verbose", "Status: inactive\n")
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	fw := &config.Firewall{
+		Enabled: true,
+		Zones: map[string]config.FirewallZone{
+			"default": {Ports: []config.PortRule{{Port: 22, Proto: "tcp"}, {Port: 80, Proto: "tcp"}}},
+		},
+	}
+	changes, err := fm.Plan(context.Background(), fw, nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(changes), 3)
+}
+
+func TestFirewall_UFW_PlanIdle(t *testing.T) {
+	mock := newFWMock().on("ufw status verbose", `Status: active
+
+22/tcp ALLOW Anywhere
+`)
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	fw := &config.Firewall{
+		Enabled: true,
+		Zones: map[string]config.FirewallZone{
+			"default": {Ports: []config.PortRule{{Port: 22, Proto: "tcp"}}},
+		},
+	}
+	changes, err := fm.Plan(context.Background(), fw, nil)
+	require.NoError(t, err)
+	require.Empty(t, changes)
+}
+
+func TestFirewall_UFW_Enable(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	require.NoError(t, fm.enable(context.Background(), FirewallBackendUFW))
+	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "ufw --force enable")
+}
+
+func TestFirewall_UFW_Disable(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	require.NoError(t, fm.disable(context.Background(), FirewallBackendUFW))
+	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "ufw --force disable")
+}
+
+func TestFirewall_Firewalld_Disable(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	require.NoError(t, fm.disable(context.Background(), FirewallBackendFirewalld))
+	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "systemctl disable --now firewalld")
+}
+
+func TestFirewall_Nftables_EnableDisable(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendNftables)
+	require.NoError(t, fm.enable(context.Background(), FirewallBackendNftables))
+	require.NoError(t, fm.disable(context.Background(), FirewallBackendNftables))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "enable --now nftables")
+	require.Contains(t, joined, "disable --now nftables")
+}
+
+func TestFirewall_EnableDisable_UnsupportedBackend(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock)
+	require.Error(t, fm.enable(context.Background(), FirewallBackend("bogus")))
+	require.Error(t, fm.disable(context.Background(), FirewallBackend("bogus")))
+}
+
+func TestFirewall_UFW_AddRemovePort(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	require.NoError(t, fm.portOp(context.Background(), FirewallBackendUFW, "add_port", "default", "80/tcp"))
+	require.NoError(t, fm.portOp(context.Background(), FirewallBackendUFW, "remove_port", "default", "80/tcp"))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "ufw allow '80'/'tcp'")
+	require.Contains(t, joined, "ufw delete allow '80'/'tcp'")
+}
+
+func TestFirewall_UFW_AddRemoveSource(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	require.NoError(t, fm.sourceOp(context.Background(), FirewallBackendUFW, "add_source", "default", "10.0.0.0/24"))
+	require.NoError(t, fm.sourceOp(context.Background(), FirewallBackendUFW, "remove_source", "default", "10.0.0.0/24"))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "ufw allow from '10.0.0.0/24'")
+	require.Contains(t, joined, "ufw delete allow from '10.0.0.0/24'")
+}
+
+func TestFirewall_Firewalld_AddRemoveSource(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	require.NoError(t, fm.sourceOp(context.Background(), FirewallBackendFirewalld, "add_source", "public", "10.0.0.0/24"))
+	require.NoError(t, fm.sourceOp(context.Background(), FirewallBackendFirewalld, "remove_source", "public", "10.0.0.0/24"))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "--add-source='10.0.0.0/24'")
+	require.Contains(t, joined, "--remove-source='10.0.0.0/24'")
+}
+
+func TestFirewall_PortOp_UnsupportedBackend(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock)
+	err := fm.portOp(context.Background(), FirewallBackend("bogus"), "add_port", "public", "22/tcp")
+	require.Error(t, err)
+}
+
+func TestFirewall_PortOp_MalformedPort(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	err := fm.portOp(context.Background(), FirewallBackendFirewalld, "add_port", "public", "noproto")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "malformed")
+}
+
+func TestFirewall_SourceOp_UnsupportedBackend(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock)
+	err := fm.sourceOp(context.Background(), FirewallBackend("bogus"), "add_source", "public", "1.2.3.4/32")
+	require.Error(t, err)
+}
+
+func TestFirewall_ApplyOne_UnknownAction(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	err := fm.applyOne(context.Background(), FirewallBackendFirewalld, Change{Action: "mystery"})
+	require.Error(t, err)
+}
+
+func TestFirewall_ApplyOne_UnknownUpdateOp(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendFirewalld)
+	err := fm.applyOne(context.Background(), FirewallBackendFirewalld,
+		Change{Action: "update", After: map[string]any{"op": "bogus"}})
+	require.Error(t, err)
+}
+
+func TestFirewall_ApplyDisable(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	changes := []Change{{Action: "update", After: map[string]any{"op": "disable_firewall"}}}
+	res, err := fm.Apply(context.Background(), changes, false)
+	require.NoError(t, err)
+	require.Len(t, res.Applied, 1)
+	require.Contains(t, strings.Join(mock.sudoRuns, " | "), "ufw --force disable")
+}
+
+func TestFirewall_ApplyNoSession(t *testing.T) {
+	fm := NewFirewallManager()
+	_, err := fm.Apply(context.Background(), []Change{{Action: "add_port"}}, false)
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestFirewall_RollbackNoSession(t *testing.T) {
+	fm := NewFirewallManager()
+	err := fm.Rollback(context.Background(), []Change{{Action: "add_port"}})
+	require.ErrorIs(t, err, ErrSessionRequired)
+}
+
+func TestFirewall_RollbackReversesAll(t *testing.T) {
+	mock := newFWMock()
+	fm := NewFirewallManager().WithSession(mock).WithBackend(FirewallBackendUFW)
+	changes := []Change{
+		{Action: "add_port", After: map[string]string{"zone": "default", "port": "80/tcp"}},
+		{Action: "remove_port", Before: map[string]string{"zone": "default", "port": "22/tcp"}},
+		{Action: "add_source", After: map[string]string{"zone": "default", "source": "1.2.3.4/32"}},
+		{Action: "remove_source", Before: map[string]string{"zone": "default", "source": "5.6.7.8/32"}},
+		{Action: "update", After: map[string]any{"op": "enable_firewall"}},
+		{Action: "update", After: map[string]any{"op": "disable_firewall"}},
+		{Action: "unknown"},
+	}
+	require.NoError(t, fm.Rollback(context.Background(), changes))
+	joined := strings.Join(mock.sudoRuns, " | ")
+	require.Contains(t, joined, "ufw delete allow '80'/'tcp'") // add_port reversed
+	require.Contains(t, joined, "ufw allow '22'/'tcp'")        // remove_port reversed
+	require.Contains(t, joined, "ufw delete allow from '1.2.3.4/32'")
+	require.Contains(t, joined, "ufw allow from '5.6.7.8/32'")
+	require.Contains(t, joined, "ufw --force disable") // rollback of enable
+	require.Contains(t, joined, "ufw --force enable")  // rollback of disable
+}
+
+func TestFirewall_DetectBackend_FromCommand(t *testing.T) {
+	// no /etc/os-release match, falls through to command -v checks
+	mock := newFWMock().on("/etc/os-release", "ID=weird\n")
+	fm := NewFirewallManager().WithSession(mock)
+	b, err := fm.detectBackend(context.Background())
+	require.NoError(t, err)
+	// mock.Run returns nil error for any command-v, so firewall-cmd wins first
+	require.Equal(t, FirewallBackendFirewalld, b)
+}
+
+func TestFirewall_ChooseMap_BothNilReturnsEmpty(t *testing.T) {
+	m, ok := chooseMap(Change{})
+	require.False(t, ok)
+	require.Empty(t, m)
+}
+
+func TestFirewall_CastVariants(t *testing.T) {
+	// config.Firewall value + pointer + config.Linux value
+	fw := config.Firewall{Enabled: true}
+	got, err := castFirewall(fw)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	got2, err := castFirewall(&fw)
+	require.NoError(t, err)
+	require.NotNil(t, got2)
+
+	lin := config.Linux{Firewall: &fw}
+	got3, err := castFirewall(lin)
+	require.NoError(t, err)
+	require.NotNil(t, got3)
+
+	got4, err := castFirewall(nil)
+	require.NoError(t, err)
+	require.Nil(t, got4)
+
+	var np *config.Linux
+	got5, err := castFirewall(np)
+	require.NoError(t, err)
+	require.Nil(t, got5)
+}
