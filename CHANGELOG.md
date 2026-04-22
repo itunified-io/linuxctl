@@ -4,6 +4,44 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.9 — 2026-04-22
+
+### Added — Conventions library (plan 033, #19)
+
+- `pkg/presets/` — embedded preset engine with 19 shipped presets (`go:embed`
+  YAML under `pkg/presets/data/`). Categories: directories (3),
+  users_groups (3), packages (4), sysctl (2), limits (2), bundles (5).
+- 4 new Linux config fields: `directories_preset`, `users_groups_preset`,
+  `packages_preset`, `bundle_preset`. All optional and additive — existing
+  manifests continue to work unchanged.
+- `linuxctl preset list [--category] [--tier]` — tabular discovery
+- `linuxctl preset show <name> [--expand]` — inspect a preset or bundle
+- `linuxctl config render` now implemented (was stub). Expands
+  `bundle_preset` + per-category `*_preset` fields into the final desired
+  state, redacts `${vault:...}` / `${gen:...}` placeholders.
+- Tier gating: all Phase-1 presets are community tier.
+  `hardened-cis-l1` / `hardened-cis-l2` reserved for business tier.
+
+### Changed
+
+- `pkg/managers/sysctl.go` + `pkg/managers/limits.go`: hardcoded
+  `oracle-19c` preset data migrated to YAML under
+  `pkg/presets/data/{sysctl,limits}/oracle-19c.yaml`. Behaviour preserved
+  byte-for-byte; existing tests (`TestSysctl_PresetExpansion`,
+  `TestSysctl_MergePresetExplicit`, `TestLimits_PresetExpansion`,
+  `TestSysctl_Plan_PresetMerge`) remain green as regression gate.
+- `pkg/managers/dir.go`, `user.go`, `package.go` accept `*config.Linux`
+  and transparently merge the referenced preset (explicit entries win).
+- `pkg/config.Linux` loader calls `expandBundleOnLinux` after YAML decode
+  so `bundle_preset` populates per-category `*_preset` fields (only when
+  the user has not set them explicitly).
+
+### Migration
+
+- Stacks using `bundle_preset: oracle-rac-19c` drop ~60 lines of
+  boilerplate (see `infrastructure/stacks/clext5/os/linux.yaml` —
+  migration lands in the infra repo alongside the linuxctl release).
+
 ## v2026.04.11.8 — 2026-04-22
 
 ### BREAKING — CLI verb rename `env` → `stack` (#17)
