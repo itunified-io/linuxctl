@@ -1,4 +1,4 @@
-.PHONY: build test vet lint tidy release-dry clean
+.PHONY: build test vet lint tidy release-dry clean docs-cli
 
 BIN      := bin/linuxctl
 PKG      := github.com/itunified-io/linuxctl
@@ -26,3 +26,7 @@ release-dry:
 
 clean:
 	rm -rf bin dist
+
+docs-cli:
+	@mkdir -p docs/cli
+	go run ./cmd/docgen docs/cli
