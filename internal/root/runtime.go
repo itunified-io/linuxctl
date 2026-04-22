@@ -23,8 +23,11 @@ func envPathFromArgs(args []string) string {
 }
 
 // openSession returns a session for the current --host flag. Empty host →
-// local session; otherwise a lazy SSH descriptor (not dialed).
-func openSession() session.Session {
+// local session; otherwise a lazy SSH descriptor (not dialed). Exposed as a
+// package-level var so tests can substitute a deterministic local session.
+var openSession = openSessionReal
+
+func openSessionReal() session.Session {
 	if gf.host == "" || gf.host == "localhost" {
 		return session.NewLocal()
 	}
