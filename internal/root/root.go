@@ -47,7 +47,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 
 	// Groups.
 	cmd.AddCommand(newConfigCmd())
-	cmd.AddCommand(newEnvCmd())
+	cmd.AddCommand(newStackCmd())
+	cmd.AddCommand(newEnvAliasCmd())
 
 	// 13 subsystem manager commands, each with plan/apply/verify.
 	cmd.AddCommand(newDiskCmd())

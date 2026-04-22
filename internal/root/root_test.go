@@ -44,7 +44,7 @@ func TestRootCmd_HelpLists14Subsystems(t *testing.T) {
 	for _, want := range []string{
 		"disk", "user", "package", "service", "mount", "sysctl",
 		"limits", "firewall", "hosts", "network", "ssh", "selinux", "dir",
-		"apply", "diff", "config", "env", "license", "version",
+		"apply", "diff", "config", "stack", "license", "version",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--help missing subcommand %q", want)
@@ -178,23 +178,50 @@ func TestConfig_Show_NotImplemented(t *testing.T) {
 	}
 }
 
-// ---- env (all stubs) ------------------------------------------------------
+// ---- stack (all stubs, + deprecated env alias) ----------------------------
 
-func TestEnv_AllSubcommandsNotImplemented(t *testing.T) {
+func TestStack_AllSubcommandsNotImplemented(t *testing.T) {
 	cases := [][]string{
-		{"env", "new", "foo"},
-		{"env", "list"},
-		{"env", "use", "foo"},
-		{"env", "current"},
-		{"env", "add", "foo"},
-		{"env", "remove", "foo"},
-		{"env", "show", "foo"},
+		{"stack", "new", "foo"},
+		{"stack", "list"},
+		{"stack", "use", "foo"},
+		{"stack", "current"},
+		{"stack", "add", "foo"},
+		{"stack", "remove", "foo"},
+		{"stack", "show", "foo"},
 	}
 	for _, args := range cases {
 		_, err := executeCmd(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "not implemented") {
 			t.Errorf("%v: expected not implemented, got %v", args, err)
 		}
+	}
+}
+
+// TestEnv_DeprecatedAlias_StillWorks verifies that the `env` subcommand tree
+// remains functional as a hidden deprecated alias for `stack` (#17, one-release
+// backward compatibility window).
+func TestEnv_DeprecatedAlias_StillWorks(t *testing.T) {
+	cases := [][]string{
+		{"env", "list"},
+		{"env", "current"},
+		{"env", "new", "foo"},
+	}
+	for _, args := range cases {
+		_, err := executeCmd(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "not implemented") {
+			t.Errorf("%v: expected not implemented (stub), got %v", args, err)
+		}
+	}
+}
+
+// TestEnv_DeprecatedAlias_EmitsWarning verifies that invoking `env` prints a
+// deprecation notice on stderr (Cobra emits this automatically for commands
+// with Deprecated set).
+func TestEnv_DeprecatedAlias_EmitsWarning(t *testing.T) {
+	out, _ := executeCmd(t, "env", "list")
+	if !strings.Contains(out, "deprecated") {
+		t.Errorf("expected deprecation warning in output, got: %s", out)
 	}
 }
 
