@@ -4,6 +4,30 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.11.6 — 2026-04-19
+
+### Added — Phase 5: cluster SSH wiring (#11)
+
+- `pkg/managers/ssh_auth.SetupClusterSSH` — complete implementation: concurrent per-node Ed25519 keypair gen (idempotent), serialized cross-authorization phase, `ssh-keyscan` seeds known_hosts; returns per-node result + accumulated errors
+- `pkg/config.Env.NodeHostnames()` — accessor extracting hostnames from opaque Hypervisor spec (handles both inline and $ref-resolved forms)
+- `linuxctl ssh setup-cluster <env.yaml>` — reads cluster nodes from env manifest (previously required repeated --host flags); `--user` repeatable (default `[grid, oracle]`); `--parallel` toggle
+
+### Fixed — (#8, now closed)
+
+- `runManager` config → managers type bridge via `usersGroupsSpec` / `packagesSpec` helpers in internal/root/runtime.go
+- `apply.go:75` nil-guard on `*ApplyResult` error return
+
+### Concurrency verified
+
+- `TestSetupClusterSSH_Concurrent`: barrier session asserts ≥2 inflight per-node operations
+- `go test -race ./...` clean (pre-existing race in `TestSSH_Run_ContextCancelled` unchanged, unrelated)
+
+### Coverage (all ≥95%)
+
+- pkg/managers: 95.0% → 95.4%
+- pkg/config: 97.4% → 97.7%
+- internal/root: 96.4% → 95.1% (held)
+
 ## v2026.04.11.5 — 2026-04-19
 
 ### Tests — final coverage push (#7)
