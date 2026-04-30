@@ -4,6 +4,36 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.3 — 2026-04-30
+
+### fix: openSession dials SSH + global --ssh-key / --ssh-user / --ssh-port flags (#25)
+
+`internal/root/runtime.go:openSession` returned a non-dialed
+`session.NewSSH(host, user)` descriptor, so the first manager call
+errored with `ssh: not connected (call Dial first)`. Apply path was
+unusable for any non-local target.
+
+Also: no way to pass an alternate SSH key/user from the CLI. Default
+`~/.ssh/id_ed25519` was hardcoded.
+
+Fix:
+- Three new persistent global flags: `--ssh-key`, `--ssh-user`,
+  `--ssh-port` (defaults: `~/.ssh/id_ed25519`, `$USER` or `root`, 22).
+- `openSessionReal` now calls `session.NewSSHDial(Opts{…})` to establish
+  the transport before returning. Dial failures fall through to a
+  non-dialed descriptor with a `warn:` line so dry-run paths still work.
+
+### fix: orchestrator desiredFor pass *config.Linux for user + dir managers (#21 follow-up)
+
+Same class of bug as #21: `pkg/apply.Orchestrator.desiredFor` returned
+raw `*config.UsersGroups` and `[]config.Directory` for the `user` /
+`dir` managers, which their cast helpers (`castUsersGroups`,
+`castDirectories`) reject *and* which bypass bundle_preset expansion.
+
+Fix: orchestrator passes the full `*config.Linux` for `user`, `dir`,
+`package` (one consolidated case), letting each manager's cast
+helper expand the preset and merge with explicit lists.
+
 ## v2026.04.30.2 — 2026-04-30
 
 ### fix: orchestrator binds Session to every manager (#23)

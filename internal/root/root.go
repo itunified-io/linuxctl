@@ -54,6 +54,9 @@ type globalFlags struct {
 	stack   string
 	env     string // deprecated alias for --stack; remove next release
 	host    string
+	sshUser string // SSH login user when --host is non-local. Default: $USER or root.
+	sshKey  string // SSH private key path. Default: ~/.ssh/id_ed25519.
+	sshPort int    // SSH port. Default 22.
 	format  string
 	yes     bool
 	dryRun  bool
@@ -90,6 +93,9 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		f.Hidden = true
 	}
 	pf.StringVar(&gf.host, "host", "", "Restrict to a single host from the stack")
+	pf.StringVar(&gf.sshUser, "ssh-user", "", "SSH login user (default: $USER or root)")
+	pf.StringVar(&gf.sshKey, "ssh-key", "", "SSH private key path (default: ~/.ssh/id_ed25519)")
+	pf.IntVar(&gf.sshPort, "ssh-port", 22, "SSH port")
 	pf.StringVar(&gf.format, "format", "table", "table|json|yaml|plain")
 	pf.BoolVar(&gf.yes, "yes", false, "Non-interactive; skip confirm prompts")
 	pf.BoolVar(&gf.dryRun, "dry-run", false, "Alias for plan; never mutate")

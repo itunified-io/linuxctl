@@ -72,13 +72,14 @@ func TestOrchestrator_DesiredFor_AllManagerNames(t *testing.T) {
 	if got, ok := stubs[1].got.([]config.Mount); !ok || len(got) != 1 {
 		t.Errorf("mount spec mismatch: %T", stubs[1].got)
 	}
-	// user → UsersGroups
-	if stubs[2].got != l.UsersGroups {
-		t.Errorf("user spec mismatch")
+	// user → full Linux (so bundle_preset can be expanded by
+	// UserManager.castUsersGroups → usersGroupsFromLinux). Fixes linuxctl#21.
+	if stubs[2].got != l {
+		t.Errorf("user spec mismatch: want full *Linux for bundle_preset, got %T", stubs[2].got)
 	}
-	// dir → Directories
-	if got, ok := stubs[3].got.([]config.Directory); !ok || len(got) != 1 {
-		t.Errorf("dir spec mismatch: %T", stubs[3].got)
+	// dir → full Linux (preset expansion). Fixes linuxctl#21.
+	if stubs[3].got != l {
+		t.Errorf("dir spec mismatch: want full *Linux for bundle_preset, got %T", stubs[3].got)
 	}
 	// package → full Linux (so bundle_preset can be expanded by
 	// PackageManager.castPackages → packagesFromLinux). Fixes linuxctl#21.
