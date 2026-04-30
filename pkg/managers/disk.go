@@ -478,7 +478,12 @@ func diskChangeCmd(c Change) (string, error) {
 		return fmt.Sprintf("grep -qxF %s /etc/fstab || echo %s >> /etc/fstab",
 			shSingleQuote(entry), shSingleQuote(entry)), nil
 	case "mount":
-		return fmt.Sprintf("mount %s", after["mountpoint"]), nil
+		// Ensure mountpoint exists before mount(8). Dir manager runs
+		// AFTER disk, so we can't rely on it to have pre-created /u01
+		// or similar. mkdir -p is idempotent, mode 0755 is safe (real
+		// ownership/perms come from the FS we're about to mount).
+		mp := fmt.Sprint(after["mountpoint"])
+		return fmt.Sprintf("mkdir -p %s && mount %s", shSingleQuote(mp), shSingleQuote(mp)), nil
 	case "error":
 		return "", fmt.Errorf("disk: %v", after["reason"])
 	}
