@@ -1,0 +1,21 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: dbx-host
+  category: limits
+  tier: community
+  source: |
+    dbx-host ulimits. The dbx user runs container processes (dbx-daemon
+    + labctl-ledger via Docker user mapping); raised nofile + nproc match
+    Tempo + Grafana defaults. memlock=unlimited preserves litestream's
+    ability to mmap WAL files without page-cache thrash.
+    Per ADR-0109 of itunified-io/infrastructure.
+  version: "2026-04-30"
+spec:
+  limits:
+    - { user: "dbx", type: "soft", item: "nofile",  value: "65536" }
+    - { user: "dbx", type: "hard", item: "nofile",  value: "131072" }
+    - { user: "dbx", type: "soft", item: "nproc",   value: "16384" }
+    - { user: "dbx", type: "hard", item: "nproc",   value: "32768" }
+    - { user: "dbx", type: "soft", item: "memlock", value: "unlimited" }
+    - { user: "dbx", type: "hard", item: "memlock", value: "unlimited" }

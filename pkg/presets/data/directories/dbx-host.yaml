@@ -1,0 +1,28 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: dbx-host
+  category: directories
+  tier: community
+  source: |
+    dbx-host directory layout. /var/lib/dbx is the data root (mounted on
+    a dedicated xfs LV per linux.yaml lvm.logical_volumes). UIDs match
+    container expectations:
+      - dbx (60001):    audit, state, ledger
+      - tempo (10001):  /var/lib/dbx/tempo
+      - grafana (472):  /var/lib/dbx/grafana
+    /etc/dbx holds vault-agent rendered env files + docker-compose.yml.
+    Per ADR-0109 of itunified-io/infrastructure.
+  version: "2026-04-30"
+spec:
+  directories:
+    - { path: "/var/lib/dbx",         owner: "dbx",   group: "dbx",   mode: "0750" }
+    - { path: "/var/lib/dbx/audit",   owner: "dbx",   group: "dbx",   mode: "0750" }
+    - { path: "/var/lib/dbx/state",   owner: "dbx",   group: "dbx",   mode: "0750" }
+    - { path: "/var/lib/dbx/ledger",  owner: "dbx",   group: "dbx",   mode: "0750" }
+    - { path: "/var/lib/dbx/tempo",   owner: "10001", group: "10001", mode: "0750" }
+    - { path: "/var/lib/dbx/grafana", owner: "472",   group: "472",   mode: "0750" }
+    - { path: "/etc/dbx",             owner: "root",  group: "dbx",   mode: "0750" }
+    - { path: "/etc/dbx/templates",   owner: "root",  group: "dbx",   mode: "0750" }
+    # NAS mount target (created idempotently; mount itself is in linux.yaml mounts:)
+    - { path: "/smb/dbx-backup",      owner: "dbx",   group: "dbx",   mode: "0750" }
