@@ -1,4 +1,20 @@
 # Changelog
+## v2026.04.30.9 — 2026-04-30
+
+### fix: mkfs force flag per filesystem (#36)
+
+DiskManager always emitted `mkfs.<fstype> -F <device>`. The `-F`
+(uppercase) flag is correct for ext2/3/4 but invalid for xfs/btrfs,
+which use `-f` (lowercase). Manifests with `fs: xfs` failed at the
+mkfs step with `mkfs.xfs` printing usage help and exiting 1.
+
+Fix: switch the flag based on fstype:
+- ext2/3/4 → `-F` (force overwrite of existing fs)
+- xfs/btrfs → `-f` (force)
+
+Live-caught running /lab-up Phase C against ext3 — u01 LV created,
+mkfs.xfs failed.
+
 
 All notable changes to `linuxctl` are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
