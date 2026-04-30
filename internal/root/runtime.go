@@ -45,11 +45,35 @@ func openSessionReal() session.Session {
 	if gf.host == "" || gf.host == "localhost" {
 		return session.NewLocal()
 	}
-	u := os.Getenv("USER")
+	u := gf.sshUser
+	if u == "" {
+		u = os.Getenv("USER")
+	}
 	if u == "" {
 		u = "root"
 	}
-	return session.NewSSH(gf.host, u)
+	port := gf.sshPort
+	if port == 0 {
+		port = 22
+	}
+	// Dial the SSH transport so managers can run commands immediately.
+	// session.NewSSH alone returns a non-dialed descriptor; managers fail
+	// with "ssh: not connected (call Dial first)" on use (linuxctl#25).
+	s, err := session.NewSSHDial(session.Opts{
+		Host:    gf.host,
+		Port:    port,
+		User:    u,
+		KeyFile: gf.sshKey,
+	})
+	if err != nil {
+		// Fall back to a non-dialed descriptor; manager calls will surface
+		// the error with manager context. We could panic here, but keeping
+		// the lazy descriptor lets `--dry-run` paths that don't actually
+		// run remote commands still work.
+		fmt.Fprintf(os.Stderr, "warn: ssh dial %s@%s:%d failed: %v\n", u, gf.host, port, err)
+		return session.NewSSH(gf.host, u)
+	}
+	return s
 }
 
 // loadLinux loads a linux.yaml from either an env.yaml or a direct linux.yaml

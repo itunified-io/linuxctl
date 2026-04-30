@@ -137,21 +137,18 @@ func (o *Orchestrator) desiredFor(name string) managers.Spec {
 	if o.Linux == nil {
 		return nil
 	}
+	// All managers that support bundle_preset expansion receive the full
+	// *config.Linux so their cast helpers (packagesFromLinux,
+	// usersGroupsFromLinux, etc.) can merge presets with explicit lists.
+	// Returning a raw *config.Packages / *config.UsersGroups bypasses
+	// preset expansion AND is rejected by their cast helpers with
+	// "unsupported desired-state type" (linuxctl#21).
 	switch name {
 	case "disk":
 		return o.Linux.DiskLayout
 	case "mount":
 		return o.Linux.Mounts
-	case "user":
-		return o.Linux.UsersGroups
-	case "dir":
-		return o.Linux.Directories
-	case "package":
-		// Pass the full Linux spec so PackageManager.castPackages can
-		// expand the bundle_preset (oracle-single-19c, etc.). Returning
-		// the raw *config.Packages bypasses preset expansion AND is
-		// rejected by castPackages with "unsupported desired-state type"
-		// (linuxctl#21).
+	case "user", "package", "dir":
 		return o.Linux
 	}
 	// For other managers, pass the full Linux spec — each may ignore.
