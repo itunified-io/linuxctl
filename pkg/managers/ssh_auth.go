@@ -162,9 +162,10 @@ func (m *SSHAuthManager) applyAuthorizedKeys(ctx context.Context, ch Change) err
 		home = "/root"
 	}
 	script := fmt.Sprintf(
-		"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+		"_g=$(id -gn %[1]s) && "+
+			"install -d -m 0700 -o %[1]s -g \"$_g\" %[2]s/.ssh && "+
 			"umask 077 && printf %%s %[3]s | tee %[2]s/.ssh/authorized_keys >/dev/null && "+
-			"chown %[1]s:%[1]s %[2]s/.ssh/authorized_keys && chmod 0600 %[2]s/.ssh/authorized_keys",
+			"chown %[1]s:\"$_g\" %[2]s/.ssh/authorized_keys && chmod 0600 %[2]s/.ssh/authorized_keys",
 		shellQuote(user), shellQuote(home), shellQuote(content),
 	)
 	return m.run(ctx, script)
@@ -455,9 +456,10 @@ func ensureKeypair(ctx context.Context, sess SessionRunner, user string) (pubkey
 	exists := strings.Contains(stdout, "__EXISTS__")
 	if !exists {
 		gen := fmt.Sprintf(
-			"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+			"_g=$(id -gn %[1]s) && "+
+			"install -d -m 0700 -o %[1]s -g \"$_g\" %[2]s/.ssh && "+
 				"ssh-keygen -t ed25519 -N '' -f %[3]s -q && "+
-				"chown %[1]s:%[1]s %[3]s %[3]s.pub && "+
+				"chown %[1]s:\"$_g\" %[3]s %[3]s.pub && "+
 				"chmod 0600 %[3]s && chmod 0644 %[3]s.pub",
 			shellQuote(user), shellQuote(home), shellQuote(keyPath),
 		)
@@ -513,9 +515,10 @@ func mergeAuthorizedKeys(ctx context.Context, sess SessionRunner, user string, p
 	}
 	content := strings.Join(merged, "\n") + "\n"
 	write := fmt.Sprintf(
-		"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+		"_g=$(id -gn %[1]s) && "+
+			"install -d -m 0700 -o %[1]s -g \"$_g\" %[2]s/.ssh && "+
 			"umask 077 && printf %%s %[3]s | tee %[4]s >/dev/null && "+
-			"chown %[1]s:%[1]s %[4]s && chmod 0600 %[4]s",
+			"chown %[1]s:\"$_g\" %[4]s && chmod 0600 %[4]s",
 		shellQuote(user), shellQuote(home), shellQuote(content), shellQuote(path),
 	)
 	if _, _, err := sess.Run(ctx, write); err != nil {
@@ -580,9 +583,10 @@ func seedKnownHosts(ctx context.Context, sess SessionRunner, users, peers []stri
 		sort.Strings(merged)
 		content := strings.Join(merged, "\n") + "\n"
 		write := fmt.Sprintf(
-			"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+			"_g=$(id -gn %[1]s) && "+
+				"install -d -m 0700 -o %[1]s -g \"$_g\" %[2]s/.ssh && "+
 				"printf %%s %[3]s | tee %[4]s >/dev/null && "+
-				"chown %[1]s:%[1]s %[4]s && chmod 0644 %[4]s",
+				"chown %[1]s:\"$_g\" %[4]s && chmod 0644 %[4]s",
 			shellQuote(user), shellQuote(home), shellQuote(content), shellQuote(path),
 		)
 		if _, _, err := sess.Run(ctx, write); err != nil {

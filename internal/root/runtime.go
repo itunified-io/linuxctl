@@ -83,8 +83,14 @@ func loadLinux(path string) (*config.Linux, error) {
 	if path == "" {
 		return &config.Linux{}, nil
 	}
+	// Build a Vault-backed resolver so ${vault:…} placeholders in
+	// linux.yaml (e.g. user.ssh_keys, user.password, mount credentials)
+	// resolve at load time instead of getting written verbatim into
+	// authorized_keys / etc/sudoers.d / shadow / cifs creds files.
+	resolver := config.NewResolver()
+	resolver.Vault = config.NewHTTPVaultReader()
 	// Heuristic: try as env first, fall back to linux.
-	env, err := config.LoadEnv(path, nil)
+	env, err := config.LoadEnv(path, resolver)
 	if err == nil && env != nil && env.Spec.Linux.Value != nil {
 		return env.Spec.Linux.Value, nil
 	}
