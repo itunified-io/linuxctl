@@ -190,6 +190,7 @@ func usersGroupsSpec(ug *config.UsersGroups) managers.UsersGroupsSpec {
 			Shell:    u.Shell,
 			SSHKeys:  u.SSHKeys,
 			Password: u.Password,
+			Sudo:     u.Sudo,
 		})
 	}
 	return spec

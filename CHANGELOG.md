@@ -4,6 +4,41 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.5 — 2026-04-30
+
+### feat: User.Sudo field — drop /etc/sudoers.d/<user> per user (#29)
+
+`config.User` and `managers.UserSpec` gain a `sudo` field with values
+`""` (no rule), `"NOPASSWD"` (passwordless), `"PASSWD"` (require
+password). UserManager Apply path now calls `applySudo` for every
+created/updated user, writing `/etc/sudoers.d/<name>` with the
+appropriate line. File is mode 0440 and validated via `visudo -cf`
+before placement so a malformed write can't break sudo cluster-wide.
+
+Empty string is a no-op (existing files untouched). YAML schema:
+
+    users_groups:
+      users:
+        - name: "buecheleb"
+          groups: ["wheel"]
+          sudo: "NOPASSWD"          # new
+          ssh_keys:
+            - "${vault:secret/data/stacks/ext3/ssh-keys#buecheleb}"
+
+Validation: `validate:"omitempty,oneof=NOPASSWD PASSWD"` rejects unknown
+strings at config load.
+
+## v2026.04.30.4 — 2026-04-30
+
+### fix: orchestrator desiredFor dispatches per-manager (#27)
+
+Default branch in `pkg/apply.Orchestrator.desiredFor` passed
+`*config.Linux` to every unknown manager. NetworkManager (and any
+manager whose cast helper rejects `*config.Linux`) errored. Fix:
+explicit per-manager dispatch for limits/sysctl/selinux/service/
+firewall/hosts/ssh; unknown returns nil; user/package/dir keep full
+`*config.Linux` for preset expansion.
+
 ## v2026.04.30.3 — 2026-04-30
 
 ### fix: openSession dials SSH + global --ssh-key / --ssh-user / --ssh-port flags (#25)

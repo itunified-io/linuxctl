@@ -99,6 +99,10 @@ type User struct {
 	Shell    string   `yaml:"shell,omitempty"`
 	SSHKeys  []string `yaml:"ssh_keys,omitempty"`
 	Password string   `yaml:"password,omitempty"`
+	// Sudo controls whether a /etc/sudoers.d/<name> rule is dropped for the
+	// user. Values: "" (no rule), "NOPASSWD" (passwordless), "PASSWD"
+	// (require password). Default empty.
+	Sudo string `yaml:"sudo,omitempty" validate:"omitempty,oneof=NOPASSWD PASSWD"`
 }
 
 // Directory is a managed filesystem directory.
