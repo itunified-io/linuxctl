@@ -10,14 +10,14 @@ import (
 
 func TestLimits_PresetExpansion(t *testing.T) {
 	p := presetLimits("oracle-19c")
-	if len(p) != 16 {
-		t.Fatalf("oracle-19c should yield 16 entries (grid+oracle * 8), got %d", len(p))
+	if len(p) != 20 {
+		t.Fatalf("oracle-19c should yield 20 entries (grid+oracle * 10, includes data unlimited), got %d", len(p))
 	}
 	users := map[string]int{}
 	for _, e := range p {
 		users[e.User]++
 	}
-	if users["grid"] != 8 || users["oracle"] != 8 {
+	if users["grid"] != 10 || users["oracle"] != 10 {
 		t.Errorf("expected 8 entries per user, got %+v", users)
 	}
 	// pg-16 now ships real content via the conventions library (plan 033).
@@ -260,7 +260,7 @@ func TestLimits_PresetOnly_DriftWhenMissing(t *testing.T) {
 		t.Fatalf("want 1 change from preset, got %+v", changes)
 	}
 	a := changes[0].After.(limitsApply)
-	if len(a.Entries) != 16 {
-		t.Errorf("want 16 preset entries, got %d", len(a.Entries))
+	if len(a.Entries) != 20 {
+		t.Errorf("want 20 preset entries, got %d", len(a.Entries))
 	}
 }

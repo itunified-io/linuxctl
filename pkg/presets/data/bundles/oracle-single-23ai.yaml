@@ -1,0 +1,15 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: oracle-single-23ai
+  category: bundles
+  tier: community
+  source: "Oracle Database 23ai single-instance baseline (sysctl/limits unchanged from 19c per Oracle docs)"
+  version: "2026-04-30"
+spec:
+  bundle:
+    directories_preset: oracle-ofa-23ai
+    users_groups_preset: oracle-single
+    packages_preset: oracle-23ai
+    sysctl_preset: oracle-19c
+    limits_preset: oracle-19c

@@ -1,0 +1,25 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: oracle-single-26ai
+  category: bundles
+  tier: community
+  source: |
+    Oracle AI Database 26ai single-instance baseline.
+    Sysctl + limits values reuse the oracle-19c preset (per Oracle's pattern,
+    these have been stable across 19c → 21c → 23ai → 26ai).
+    Min OL9.2 / UEK7 (5.15.0-201) per official docs:
+    https://docs.oracle.com/en/database/oracle/oracle-database/26/ladbi/
+    Notable 26ai delta vs older guides: transparent_hugepage MUST be 'madvise'
+    (NOT 'never') on UEK7+ — set via kernel cmdline grub-mkconfig, out of scope
+    for sysctl preset.
+  version: "2026-04-30"
+spec:
+  bundle:
+    # Reuse 23ai OFA dirs (no schema change in 26ai docs); revisit if Oracle
+    # adds new components (e.g. AI vector cache directories) to OFA.
+    directories_preset: oracle-ofa-23ai
+    users_groups_preset: oracle-single
+    packages_preset: oracle-26ai
+    sysctl_preset: oracle-19c
+    limits_preset: oracle-19c

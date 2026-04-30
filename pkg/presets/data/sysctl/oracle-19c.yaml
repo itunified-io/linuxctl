@@ -4,17 +4,35 @@ metadata:
   name: oracle-19c
   category: sysctl
   tier: community
-  source: "Oracle Database 19c pre-install kernel parameters (migrated from pkg/managers/sysctl.go)"
-  version: "2026-04-22"
+  source: |
+    Oracle Database 19c on Oracle Linux 9 — Server-Class System Requirements
+    (Oracle Database Linux Installation Guide, Configuring Kernel Parameters).
+    Aligns with values written by oracle-database-preinstall-19c RPM.
+    See: docs.oracle.com/en/database/oracle/oracle-database/19/ladbi/
+  version: "2026-04-30"
 spec:
   sysctl:
-    - { key: "fs.aio-max-nr",        value: "1048576" }
-    - { key: "fs.file-max",          value: "6815744" }
-    - { key: "kernel.panic_on_oops", value: "1" }
-    - { key: "kernel.sem",           value: "250 32000 100 128" }
-    - { key: "kernel.shmall",        value: "1073741824" }
-    - { key: "kernel.shmmax",        value: "4398046511104" }
-    - { key: "kernel.shmmni",        value: "4096" }
-    - { key: "net.core.rmem_max",    value: "4194304" }
-    - { key: "net.core.wmem_max",    value: "1048576" }
-    - { key: "vm.swappiness",        value: "10" }
+    # File-system tunables
+    - { key: "fs.aio-max-nr",                 value: "1048576" }
+    - { key: "fs.file-max",                   value: "6815744" }
+    # Shared memory + semaphores
+    - { key: "kernel.sem",                    value: "250 32000 100 128" }
+    - { key: "kernel.shmall",                 value: "1073741824" }
+    - { key: "kernel.shmmax",                 value: "4398046511104" }   # 4 TiB upper bound
+    - { key: "kernel.shmmni",                 value: "4096" }
+    # Networking — RAC interconnect + general buffer sizing
+    - { key: "net.core.rmem_default",         value: "262144" }
+    - { key: "net.core.rmem_max",             value: "4194304" }
+    - { key: "net.core.wmem_default",         value: "262144" }
+    - { key: "net.core.wmem_max",             value: "1048576" }
+    # rp_filter must be loose (2) so RAC heartbeat traffic on a second NIC
+    # isn't dropped by strict reverse-path filtering. Required by Oracle docs
+    # for both single-instance + RAC; harmless on non-RAC.
+    - { key: "net.ipv4.conf.all.rp_filter",     value: "2" }
+    - { key: "net.ipv4.conf.default.rp_filter", value: "2" }
+    # Kernel behavior on oops — Oracle requires panic so cluster failure
+    # detection trips quickly rather than running on a corrupt kernel.
+    - { key: "kernel.panic_on_oops",          value: "1" }
+    # Tuning recommendation (not strictly required) — biases the OS away
+    # from swapping the SGA out under cache pressure.
+    - { key: "vm.swappiness",                 value: "10" }
