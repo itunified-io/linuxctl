@@ -4,18 +4,15 @@ metadata:
   name: oracle-19c
   category: limits
   tier: community
-  source: "Oracle Database 19c pre-install resource limits (migrated from pkg/managers/limits.go)"
-  version: "2026-04-22"
+  source: |
+    Oracle Database 19c on Oracle Linux 9 — Configuring Shell Limits
+    (Oracle Database Linux Installation Guide).
+    Aligns with values written by oracle-database-preinstall-19c RPM.
+    See: docs.oracle.com/en/database/oracle/oracle-database/19/ladbi/
+  version: "2026-04-30"
 spec:
   limits:
-    - { user: "grid",   type: "soft", item: "nofile",  value: "1024" }
-    - { user: "grid",   type: "hard", item: "nofile",  value: "65536" }
-    - { user: "grid",   type: "soft", item: "nproc",   value: "16384" }
-    - { user: "grid",   type: "hard", item: "nproc",   value: "16384" }
-    - { user: "grid",   type: "soft", item: "stack",   value: "10240" }
-    - { user: "grid",   type: "hard", item: "stack",   value: "32768" }
-    - { user: "grid",   type: "soft", item: "memlock", value: "134217728" }
-    - { user: "grid",   type: "hard", item: "memlock", value: "134217728" }
+    # oracle user — same set applies to grid (mirrored below)
     - { user: "oracle", type: "soft", item: "nofile",  value: "1024" }
     - { user: "oracle", type: "hard", item: "nofile",  value: "65536" }
     - { user: "oracle", type: "soft", item: "nproc",   value: "16384" }
@@ -24,3 +21,19 @@ spec:
     - { user: "oracle", type: "hard", item: "stack",   value: "32768" }
     - { user: "oracle", type: "soft", item: "memlock", value: "134217728" }
     - { user: "oracle", type: "hard", item: "memlock", value: "134217728" }
+    # data unlimited — required by Oracle (MoS 1264284.1) to work around a
+    # RHEL/OL kernel limit on the data segment under sustained DB load.
+    # Without it: ORA-27300 / ORA-27301 / ORA-27302 / ORA-04030 surface.
+    - { user: "oracle", type: "soft", item: "data",    value: "unlimited" }
+    - { user: "oracle", type: "hard", item: "data",    value: "unlimited" }
+    # grid user — Grid Infrastructure / ASM / Oracle Restart
+    - { user: "grid",   type: "soft", item: "nofile",  value: "1024" }
+    - { user: "grid",   type: "hard", item: "nofile",  value: "65536" }
+    - { user: "grid",   type: "soft", item: "nproc",   value: "16384" }
+    - { user: "grid",   type: "hard", item: "nproc",   value: "16384" }
+    - { user: "grid",   type: "soft", item: "stack",   value: "10240" }
+    - { user: "grid",   type: "hard", item: "stack",   value: "32768" }
+    - { user: "grid",   type: "soft", item: "memlock", value: "134217728" }
+    - { user: "grid",   type: "hard", item: "memlock", value: "134217728" }
+    - { user: "grid",   type: "soft", item: "data",    value: "unlimited" }
+    - { user: "grid",   type: "hard", item: "data",    value: "unlimited" }

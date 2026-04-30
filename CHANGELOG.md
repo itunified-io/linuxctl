@@ -4,6 +4,47 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.6 — 2026-04-30
+
+### feat: oracle-presets aligned with Oracle docs 19c/21c/23ai/26ai (#30)
+
+Audited every value in `presets/data/{sysctl,limits,packages,bundles}/oracle-*`
+against Oracle's official Linux Database Installation Guides (19c GUID-…,
+21c, 23ai, and 26ai per https://docs.oracle.com/en/database/oracle/oracle-database/26/ladbi/).
+
+**sysctl/oracle-19c.yaml — added 4 missing keys** that
+`oracle-database-preinstall-19c` writes but our preset wasn't enforcing
+(would let CIS scans / kernel upgrades silently drift values):
+
+  - `net.core.rmem_default = 262144`
+  - `net.core.wmem_default = 262144`
+  - `net.ipv4.conf.all.rp_filter = 2` (loose; required for RAC interconnect)
+  - `net.ipv4.conf.default.rp_filter = 2`
+
+**limits/oracle-19c.yaml — added `data unlimited`** for both `oracle` and
+`grid` users (MoS Doc ID 1264284.1 — RHEL/OL data-segment workaround;
+without it ORA-27300/27301/27302/04030 surface under sustained load).
+
+**New presets:**
+- `packages/oracle-21c.yaml` — preinstall RPM `oracle-database-preinstall-21c`
+- `packages/oracle-26ai.yaml` — preinstall RPM `oracle-database-preinstall-26ai`
+  (PROVISIONAL — name predicted from Oracle's 19c→21c→23ai naming pattern;
+  verify with `dnf list available 'oracle-database-preinstall-*'` once the
+  RPM is published in `ol9_oracle_software`)
+- `bundles/oracle-single-21c.yaml`, `oracle-single-23ai.yaml`,
+  `oracle-single-26ai.yaml` — composing the corresponding package preset
+  with the (unchanged) 19c sysctl + limits + users + OFA dirs.
+
+**Cross-version alignment per Oracle docs**: sysctl and limits values are
+identical across 19c → 21c → 23ai → 26ai, so all bundles reuse
+`oracle-19c` for those layers. The 26ai-specific delta (transparent
+hugepage = `madvise` for UEK7+, replacing the older `never`) is at the
+kernel cmdline layer, out of scope for sysctl/limits presets — handled
+separately by the preinstall RPM's grub config.
+
+Tests in `pkg/presets/presets_test.go` + `pkg/managers/limits_test.go`
+updated for the new value counts.
+
 ## v2026.04.30.5 — 2026-04-30
 
 ### feat: User.Sudo field — drop /etc/sudoers.d/<user> per user (#29)

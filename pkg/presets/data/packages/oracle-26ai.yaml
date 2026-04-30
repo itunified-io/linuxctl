@@ -1,0 +1,18 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: oracle-26ai
+  category: packages
+  tier: community
+  source: |
+    Oracle AI Database 26ai — Linux Database Installation Guide
+    https://docs.oracle.com/en/database/oracle/oracle-database/26/ladbi/
+    RPM name follows Oracle's 19c→21c→23ai pattern: oracle-database-preinstall-26ai.
+    PROVISIONAL: confirm exact RPM name + repo via dnf list available 'oracle-database-preinstall-*' on a current OL9 once the RPM is published.
+  version: "2026-04-30"
+spec:
+  packages:
+    install:
+      - oracle-database-preinstall-26ai
+      - kmod-oracleasm
+      - cifs-utils

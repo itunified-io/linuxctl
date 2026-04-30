@@ -253,7 +253,10 @@ func TestEmbeddedPresets_Oracle19cSysctlByteForByte(t *testing.T) {
 	wantKeys := []string{
 		"fs.aio-max-nr", "fs.file-max", "kernel.panic_on_oops",
 		"kernel.sem", "kernel.shmall", "kernel.shmmax", "kernel.shmmni",
-		"net.core.rmem_max", "net.core.wmem_max", "vm.swappiness",
+		"net.core.rmem_default", "net.core.rmem_max",
+		"net.core.wmem_default", "net.core.wmem_max",
+		"net.ipv4.conf.all.rp_filter", "net.ipv4.conf.default.rp_filter",
+		"vm.swappiness",
 	}
 	if len(entries) != len(wantKeys) {
 		t.Errorf("oracle-19c sysctl preset: want %d entries, got %d", len(wantKeys), len(entries))
@@ -290,15 +293,17 @@ func TestEmbeddedPresets_Oracle19cLimitsByteForByte(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 16 {
-		t.Errorf("oracle-19c limits: want 16 entries (2 users * 8), got %d", len(entries))
+	// 2 users × 10 entries (nofile/nproc/stack/memlock × soft+hard = 8) +
+	// 2 entries per user for `data` (soft+hard unlimited; MoS 1264284.1).
+	if len(entries) != 20 {
+		t.Errorf("oracle-19c limits: want 20 entries (2 users * 10), got %d", len(entries))
 	}
 	userCount := map[string]int{}
 	for _, e := range entries {
 		userCount[e.User]++
 	}
-	if userCount["grid"] != 8 || userCount["oracle"] != 8 {
-		t.Errorf("want 8 entries per user, got %+v", userCount)
+	if userCount["grid"] != 10 || userCount["oracle"] != 10 {
+		t.Errorf("want 10 entries per user, got %+v", userCount)
 	}
 }
 
