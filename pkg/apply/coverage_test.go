@@ -80,9 +80,10 @@ func TestOrchestrator_DesiredFor_AllManagerNames(t *testing.T) {
 	if got, ok := stubs[3].got.([]config.Directory); !ok || len(got) != 1 {
 		t.Errorf("dir spec mismatch: %T", stubs[3].got)
 	}
-	// package → Packages
-	if stubs[4].got != l.Packages {
-		t.Errorf("package spec mismatch")
+	// package → full Linux (so bundle_preset can be expanded by
+	// PackageManager.castPackages → packagesFromLinux). Fixes linuxctl#21.
+	if stubs[4].got != l {
+		t.Errorf("package spec mismatch: want full *Linux for bundle_preset, got %T", stubs[4].got)
 	}
 	// sysctl → full Linux (default branch)
 	if stubs[5].got != l {

@@ -391,6 +391,17 @@ func castPackages(desired Spec) (PackagesSpec, error) {
 		return packagesFromLinux(v), nil
 	case config.Linux:
 		return packagesFromLinux(&v), nil
+	case *config.Packages:
+		// Raw config.Packages (no bundle preset context). Convert
+		// install/remove lists directly. This is the fallback path when
+		// a caller passes the typed config struct without the enclosing
+		// Linux — bundle presets cannot be expanded here.
+		if v == nil {
+			return PackagesSpec{}, nil
+		}
+		return PackagesSpec{Install: v.Install, Remove: v.Remove}, nil
+	case config.Packages:
+		return PackagesSpec{Install: v.Install, Remove: v.Remove}, nil
 	case nil:
 		return PackagesSpec{}, nil
 	default:
