@@ -32,6 +32,7 @@ type UserSpec struct {
 	Shell    string   `yaml:"shell,omitempty"`
 	SSHKeys  []string `yaml:"ssh_keys,omitempty"`
 	Password string   `yaml:"password,omitempty"` // hash, or ${vault:...}
+	Sudo     string   `yaml:"sudo,omitempty"`     // "" | "NOPASSWD" | "PASSWD"
 }
 
 // GroupSpec is a single group entry.
@@ -323,6 +324,9 @@ func (m *UserManager) createUser(ctx context.Context, u UserSpec) error {
 			return err
 		}
 	}
+	if err := m.applySudo(ctx, u); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -359,6 +363,36 @@ func (m *UserManager) updateUser(ctx context.Context, u UserSpec) error {
 		if err := m.applyPassword(ctx, u); err != nil {
 			return err
 		}
+	}
+	if err := m.applySudo(ctx, u); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applySudo writes /etc/sudoers.d/<user> with a NOPASSWD or PASSWD rule per
+// UserSpec.Sudo. Empty string is a no-op (file untouched). The file is mode
+// 0440 (sudoers requirement) and validated via `visudo -cf` before placement.
+func (m *UserManager) applySudo(ctx context.Context, u UserSpec) error {
+	if u.Sudo == "" {
+		return nil
+	}
+	var line string
+	switch strings.ToUpper(u.Sudo) {
+	case "NOPASSWD":
+		line = fmt.Sprintf("%s ALL=(ALL) NOPASSWD: ALL\n", u.Name)
+	case "PASSWD":
+		line = fmt.Sprintf("%s ALL=(ALL) ALL\n", u.Name)
+	default:
+		return fmt.Errorf("user %s: unknown sudo policy %q (want NOPASSWD or PASSWD)", u.Name, u.Sudo)
+	}
+	path := "/etc/sudoers.d/" + u.Name
+	cmd := fmt.Sprintf(
+		"umask 277 && printf %%s %s | tee %s >/dev/null && chmod 0440 %s && visudo -cf %s",
+		shellQuote(line), shellQuote(path), shellQuote(path), shellQuote(path),
+	)
+	if err := m.run(ctx, cmd); err != nil {
+		return fmt.Errorf("apply sudo for %s: %w", u.Name, err)
 	}
 	return nil
 }
@@ -590,6 +624,7 @@ func usersGroupsFromLinux(l *config.Linux) UsersGroupsSpec {
 			Shell:    u.Shell,
 			SSHKeys:  u.SSHKeys,
 			Password: u.Password,
+			Sudo:     u.Sudo,
 		})
 	}
 	return out
