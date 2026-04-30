@@ -158,10 +158,52 @@ func (o *Orchestrator) desiredFor(name string) managers.Spec {
 	return o.Linux
 }
 
+// bindSession attaches o.Session to every manager that supports it. Each
+// concrete manager exposes its own WithSession method (mixed signatures —
+// some take session.Session, others a SessionRunner / sudoRunner subset);
+// session.Session satisfies all three. Without this, managers that need
+// remote command execution (package, user, selinux, …) fail at Plan/Apply
+// with "no session attached" (linuxctl#23).
+func (o *Orchestrator) bindSession(m managers.Manager) managers.Manager {
+	if o.Session == nil {
+		return m
+	}
+	switch v := m.(type) {
+	case *managers.DiskManager:
+		return v.WithSession(o.Session)
+	case *managers.MountManager:
+		return v.WithSession(o.Session)
+	case *managers.UserManager:
+		return v.WithSession(o.Session)
+	case *managers.PackageManager:
+		return v.WithSession(o.Session)
+	case *managers.DirManager:
+		return v.WithSession(o.Session)
+	case *managers.LimitsManager:
+		return v.WithSession(o.Session)
+	case *managers.SELinuxManager:
+		return v.WithSession(o.Session)
+	case *managers.SysctlManager:
+		return v.WithSession(o.Session)
+	case *managers.ServiceManager:
+		return v.WithSession(o.Session)
+	case *managers.FirewallManager:
+		return v.WithSession(o.Session)
+	case *managers.HostsManager:
+		return v.WithSession(o.Session)
+	case *managers.NetworkManager:
+		return v.WithSession(o.Session)
+	case *managers.SSHAuthManager:
+		return v.WithSession(o.Session)
+	}
+	return m
+}
+
 // Plan runs Plan on every manager and aggregates the resulting changes.
 func (o *Orchestrator) Plan(ctx context.Context) (PlanResult, error) {
 	res := PlanResult{ByManager: map[string][]managers.Change{}}
 	for _, m := range o.resolveManagers() {
+		m = o.bindSession(m)
 		cs, err := m.Plan(ctx, o.desiredFor(m.Name()), nil)
 		if err != nil {
 			return res, fmt.Errorf("%s plan: %w", m.Name(), err)
@@ -195,6 +237,7 @@ func (o *Orchestrator) Apply(ctx context.Context) (*managers.ApplyResult, error)
 	}
 	agg := &managers.ApplyResult{RunID: "apply-all"}
 	for _, m := range o.resolveManagers() {
+		m = o.bindSession(m)
 		cs, ok := plan.ByManager[m.Name()]
 		if !ok {
 			continue
@@ -221,6 +264,7 @@ func (o *Orchestrator) Apply(ctx context.Context) (*managers.ApplyResult, error)
 func (o *Orchestrator) Verify(ctx context.Context) (*VerifyAggregate, error) {
 	agg := &VerifyAggregate{Matches: true, Detail: map[string]managers.VerifyResult{}}
 	for _, m := range o.resolveManagers() {
+		m = o.bindSession(m)
 		r, err := m.Verify(ctx, o.desiredFor(m.Name()))
 		if err != nil {
 			return agg, fmt.Errorf("%s verify: %w", m.Name(), err)
@@ -239,7 +283,7 @@ func (o *Orchestrator) Rollback(ctx context.Context) error {
 	order := o.resolveManagers()
 	var errs []string
 	for i := len(order) - 1; i >= 0; i-- {
-		m := order[i]
+		m := o.bindSession(order[i])
 		cs, ok := o.applied[m.Name()]
 		if !ok || len(cs) == 0 {
 			continue
