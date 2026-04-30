@@ -1,4 +1,19 @@
 # Changelog
+## v2026.04.30.11 — 2026-04-30
+
+### feat: dbx-host bundle preset (#44)
+
+New conventions-library preset for dbx-control hosts (per ADR-0109 of itunified-io/infrastructure — agentic-AI hardening master plan Item 11 capstone).
+
+- `pkg/presets/data/packages/dbx-host.yaml` — Docker + docker-compose-plugin, Vault agent, chrony, firewalld, cifs-utils, rsync, litestream, jq/curl/tar/xfsprogs, container-selinux
+- `pkg/presets/data/users_groups/dbx-host.yaml` — `dbx` system user (UID/GID 60001) owning /var/lib/dbx
+- `pkg/presets/data/sysctl/dbx-host.yaml` — vm.max_map_count=262144 (Tempo), net.core.somaxconn=4096, fs.inotify.max_user_watches=524288
+- `pkg/presets/data/limits/dbx-host.yaml` — dbx ulimits (nofile 65536/131072, nproc 16384/32768, memlock unlimited)
+- `pkg/presets/data/directories/dbx-host.yaml` — /var/lib/dbx hierarchy with container-matched UIDs (dbx 60001, tempo 10001, grafana 472)
+- `pkg/presets/data/bundles/dbx-host.yaml` — composed bundle
+
+Used by `infrastructure/stacks/dbx-control/linux.yaml` (`bundle_preset: dbx-host`). Discoverable via `linuxctl preset list` (Cluster A item 1 — unblocks live deployment of dbx01.itunified.io).
+
 ## v2026.04.30.9 — 2026-04-30
 
 ### fix: mkfs force flag per filesystem (#36)
