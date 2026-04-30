@@ -46,6 +46,7 @@ func TestOrchestrator_DesiredFor_AllManagerNames(t *testing.T) {
 		UsersGroups: &config.UsersGroups{},
 		Directories: []config.Directory{{Path: "/a"}},
 		Packages:    &config.Packages{},
+		Sysctl:      []config.SysctlEntry{{Key: "vm.swappiness", Value: "10"}},
 	}
 	stubs := []*specCaptureStub{
 		{name: "disk"},
@@ -86,13 +87,16 @@ func TestOrchestrator_DesiredFor_AllManagerNames(t *testing.T) {
 	if stubs[4].got != l {
 		t.Errorf("package spec mismatch: want full *Linux for bundle_preset, got %T", stubs[4].got)
 	}
-	// sysctl → full Linux (default branch)
-	if stubs[5].got != l {
-		t.Errorf("sysctl default-branch should receive full Linux; got %T", stubs[5].got)
+	// sysctl → []SysctlEntry (typed slice the manager expects directly).
+	// Per #25, orchestrator now dispatches per-manager rather than passing
+	// full *Linux as a fall-through default.
+	if got, ok := stubs[5].got.([]config.SysctlEntry); !ok || len(got) != 1 {
+		t.Errorf("sysctl spec mismatch: %T", stubs[5].got)
 	}
-	// unknown → also default branch
-	if stubs[6].got != l {
-		t.Errorf("unknown default-branch should receive full Linux; got %T", stubs[6].got)
+	// unknown → nil (default branch). Avoids passing *config.Linux to
+	// managers whose cast helpers reject it (e.g. NetworkManager).
+	if stubs[6].got != nil {
+		t.Errorf("unknown default-branch should receive nil; got %T", stubs[6].got)
 	}
 }
 
