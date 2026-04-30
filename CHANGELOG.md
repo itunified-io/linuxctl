@@ -4,6 +4,29 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.1 — 2026-04-30
+
+### fix: orchestrator passes *config.Linux to PackageManager (#21)
+
+`pkg/apply/orchestrator.go:desiredFor` returned `o.Linux.Packages` (raw
+`*config.Packages`) for the `package` manager. `PackageManager.castPackages`
+only handled `*config.Linux` / `PackagesSpec`; passing `*config.Packages`
+was rejected with `package: unsupported desired-state type *config.Packages`,
+AND skipped `bundle_preset` expansion.
+
+Fix:
+- Orchestrator now passes the full `*config.Linux` for the `package` case,
+  matching `internal/root/runtime.go`'s already-correct path. Bundle presets
+  (`oracle-single-19c`, etc.) now expand into the install/remove lists.
+- `castPackages` defensively accepts `*config.Packages` / `config.Packages`
+  too, returning `PackagesSpec{Install, Remove}` directly. Bundle presets
+  cannot be expanded on this fallback path (no enclosing `*config.Linux`).
+- Updated `pkg/apply/coverage_test.go` to assert the new behavior.
+
+Live-caught running `/lab-up` Phase C against ext3+ext4 (infrastructure
+plan 034) — VMs install + boot fine on static IPs, blocked at OS-config
+layer until this fix.
+
 ## v2026.04.11.9 — 2026-04-22
 
 ### Added — Conventions library (plan 033, #19)

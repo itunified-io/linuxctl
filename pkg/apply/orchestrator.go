@@ -147,7 +147,12 @@ func (o *Orchestrator) desiredFor(name string) managers.Spec {
 	case "dir":
 		return o.Linux.Directories
 	case "package":
-		return o.Linux.Packages
+		// Pass the full Linux spec so PackageManager.castPackages can
+		// expand the bundle_preset (oracle-single-19c, etc.). Returning
+		// the raw *config.Packages bypasses preset expansion AND is
+		// rejected by castPackages with "unsupported desired-state type"
+		// (linuxctl#21).
+		return o.Linux
 	}
 	// For other managers, pass the full Linux spec — each may ignore.
 	return o.Linux
