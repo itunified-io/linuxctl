@@ -334,7 +334,7 @@ func TestDiskChangeCmd_AllOps(t *testing.T) {
 		{after: map[string]any{"op": "vgcreate", "name": "vg1", "pvs": []any{"/dev/sdb"}}, wantSub: "vgcreate vg1 /dev/sdb"},
 		{after: map[string]any{"op": "lvcreate", "name": "lv1", "size": "1G", "vg": "vg1"}, wantSub: "lvcreate -y -n lv1 -L 1G vg1"},
 		{after: map[string]any{"op": "mkfs", "fstype": "ext4", "device": "/dev/vg1/lv1"}, wantSub: "mkfs.ext4 -F /dev/vg1/lv1"},
-		{after: map[string]any{"op": "mount", "mountpoint": "/data"}, wantSub: "mount /data"},
+		{after: map[string]any{"op": "mount", "mountpoint": "/data"}, wantSub: "mount '/data'"},
 		{after: map[string]any{"op": "fstab", "entry": "foo"}, wantSub: "/etc/fstab"},
 		{after: map[string]any{"op": "error", "reason": "boom"}, wantErr: true},
 		{after: map[string]any{"op": "mystery"}, wantErr: true},

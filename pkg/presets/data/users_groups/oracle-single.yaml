@@ -4,12 +4,26 @@ metadata:
   name: oracle-single
   category: users_groups
   tier: community
-  source: "Oracle Database single-instance install: simplified user/group set (no ASM/RAC groups)"
-  version: "2026-04-22"
+  source: |
+    Oracle Database single-instance install with role-separation
+    (Oracle DB owner + Grid Infrastructure owner). Aligns with the
+    Oracle Database 19c Linux Install Guide §6 "Creating Operating
+    System Privileges Groups, Users, and Directories".
+    Even single-instance installs need 'grid' for ASM/Oracle Restart.
+  version: "2026-04-30"
 spec:
   users_groups:
     groups:
-      - { name: "oinstall", gid: 54321 }
-      - { name: "dba",      gid: 54322 }
+      - { name: "oinstall", gid: 54321 }   # OINSTALL — Oracle Inventory
+      - { name: "dba",      gid: 54322 }   # OSDBA  — DB administrators
+      - { name: "asmadmin", gid: 54323 }   # OSASM  — ASM administrators
+      - { name: "asmdba",   gid: 54324 }   # OSDBA for ASM
+      - { name: "asmoper",  gid: 54325 }   # OSOPER for ASM
     users:
-      - { name: "oracle", uid: 54321, gid: "oinstall", groups: ["dba"] }
+      # Oracle DB owner. Primary group = oinstall (matches what the
+      # oracle-database-preinstall-19c RPM creates; preset kept idempotent).
+      - { name: "oracle", uid: 54321, gid: "oinstall",
+          groups: ["dba", "asmdba"] }
+      # Grid Infrastructure / ASM / Oracle Restart owner.
+      - { name: "grid",   uid: 54322, gid: "oinstall",
+          groups: ["asmadmin", "asmdba", "asmoper", "dba"] }

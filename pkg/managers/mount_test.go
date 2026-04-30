@@ -314,14 +314,18 @@ func TestMountManager_ApplyOne_UnknownOp(t *testing.T) {
 	}
 }
 
-func TestMountManager_ApplyOne_CIFSCredentials_EmptySkipped(t *testing.T) {
+func TestMountManager_ApplyOne_CIFSCredentials_NoCredsErrors(t *testing.T) {
+	// Post-#42: empty username/password + no credentials_vault is a HARD
+	// error, not a silent skip. The whole point of #42 is to surface
+	// "operator forgot the credentials" rather than fail later at mount time
+	// with an opaque "credentials file missing".
 	ms := newFullMock()
 	m := NewMountManager().WithSession(ms)
 	err := m.applyOne(context.Background(), Change{After: map[string]any{
 		"op": "cifs_credentials", "path": "/etc/cifs/creds",
 	}})
-	if err != nil {
-		t.Fatalf("should silently skip: %v", err)
+	if err == nil {
+		t.Fatalf("expected error: empty creds + no vault path should fail loudly")
 	}
 }
 

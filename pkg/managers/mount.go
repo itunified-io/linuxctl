@@ -15,6 +15,12 @@ import (
 // written to /etc/cifs-utils/credentials/<tag> with mode 0600.
 type MountManager struct {
 	Session session.Session
+	// Vault optionally resolves CIFS credentials from a Vault path declared
+	// via `credentials_vault:` in the Mount manifest. The expected schema
+	// at the resolved path is `{"username": "<u>", "password": "<p>"}`.
+	// If nil, manifests with credentials_vault and no inline username/password
+	// produce an apply-time error pointing the operator at this gap.
+	Vault config.VaultReader
 }
 
 // NewMountManager returns a mount manager.
@@ -317,10 +323,30 @@ func (m *MountManager) applyOne(ctx context.Context, c Change) error {
 		path, _ := after["path"].(string)
 		user, _ := after["username"].(string)
 		pass, _ := after["password"].(string)
-		if user == "" || pass == "" {
-			// Credentials resolved from Vault elsewhere; if we still have
-			// nothing, skip silently — Apply expects caller to have populated.
-			return nil
+		// Fall through to Vault if username/password not pre-populated and
+		// `vault:` carries a path. The expected schema at the path is a
+		// kv with `username` and `password` keys.
+		if (user == "" || pass == "") {
+			vaultPath, _ := after["vault"].(string)
+			if vaultPath == "" {
+				return fmt.Errorf("mount: cifs_credentials %s: no inline username/password and no credentials_vault — set one", path)
+			}
+			vault := m.Vault
+			if vault == nil {
+				// Lazy default: build a Vault HTTP reader from env vars.
+				// Lets MountManager work with the registry pattern without
+				// requiring runtime-side wiring.
+				vault = config.NewHTTPVaultReader()
+			}
+			u, err := vault.Read(vaultPath + "#username")
+			if err != nil {
+				return fmt.Errorf("mount: cifs_credentials %s: read username from %s: %w", path, vaultPath, err)
+			}
+			p, err := vault.Read(vaultPath + "#password")
+			if err != nil {
+				return fmt.Errorf("mount: cifs_credentials %s: read password from %s: %w", path, vaultPath, err)
+			}
+			user, pass = u, p
 		}
 		if _, _, err := m.Session.RunSudo(ctx, "mkdir -p "+shSingleQuote(filepath.Dir(path))); err != nil {
 			return err

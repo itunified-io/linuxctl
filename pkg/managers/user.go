@@ -408,11 +408,15 @@ func (m *UserManager) applySSHKeys(ctx context.Context, u UserSpec) error {
 		home = "/home/" + u.Name
 	}
 	content := strings.Join(u.SSHKeys, "\n") + "\n"
-	// Single shell pipeline: make dir, tee into authorized_keys, chown, chmod.
+	// Resolve the user's PRIMARY GROUP at apply time via `id -gn`.
+	// Hardcoding `<user>:<user>` breaks for accounts whose primary group
+	// differs from the user name (e.g. the oracle-database-preinstall RPM
+	// creates `oracle` with primary group `oinstall`).
 	script := fmt.Sprintf(
-		"install -d -m 0700 -o %[1]s -g %[1]s %[2]s/.ssh && "+
+		"_g=$(id -gn %[1]s) && "+
+			"install -d -m 0700 -o %[1]s -g \"$_g\" %[2]s/.ssh && "+
 			"umask 077 && printf %%s %[3]s | tee %[2]s/.ssh/authorized_keys >/dev/null && "+
-			"chown %[1]s:%[1]s %[2]s/.ssh/authorized_keys && chmod 0600 %[2]s/.ssh/authorized_keys",
+			"chown %[1]s:\"$_g\" %[2]s/.ssh/authorized_keys && chmod 0600 %[2]s/.ssh/authorized_keys",
 		shellQuote(u.Name), shellQuote(home), shellQuote(content),
 	)
 	return m.run(ctx, script)
