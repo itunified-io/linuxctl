@@ -4,6 +4,25 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.2 — 2026-04-30
+
+### fix: orchestrator binds Session to every manager (#23)
+
+`pkg/apply.Orchestrator` pulled managers from the global registry but
+never attached its `o.Session` to them. Plan/Apply/Verify/Rollback all
+errored on first session-aware manager: `package.Plan: no session
+attached`, `selinux.Apply: no session attached`, etc. The orchestrator
+path was effectively unusable for real remote runs.
+
+Fix: new `(*Orchestrator).bindSession(m Manager) Manager` type-switches
+on all 13 concrete manager types and calls each one's `WithSession`
+(signatures vary — `session.Session` / `SessionRunner` / `sudoRunner` —
+but `session.Session` satisfies all of them). Plan/Apply/Verify/Rollback
+all wrap each manager through `bindSession` before use.
+
+Live-caught running `/lab-up` Phase C against ext3+ext4 — VMs were ready
+on static IPs, package manager errored at session-attach.
+
 ## v2026.04.30.1 — 2026-04-30
 
 ### fix: orchestrator passes *config.Linux to PackageManager (#21)
