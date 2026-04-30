@@ -457,7 +457,17 @@ func diskChangeCmd(c Change) (string, error) {
 		}
 		return fmt.Sprintf("lvcreate -y -n %s %s %s %s", after["name"], flag, val, after["vg"]), nil
 	case "mkfs":
-		return fmt.Sprintf("mkfs.%s -F %s", after["fstype"], after["device"]), nil
+		// Force flag differs per fs:
+		//   mkfs.ext4 / mkfs.ext3 / mkfs.ext2 → -F (uppercase)
+		//   mkfs.xfs                          → -f (lowercase)
+		//   mkfs.btrfs                        → -f (lowercase)
+		fstype := fmt.Sprint(after["fstype"])
+		force := "-F"
+		switch fstype {
+		case "xfs", "btrfs":
+			force = "-f"
+		}
+		return fmt.Sprintf("mkfs.%s %s %s", fstype, force, after["device"]), nil
 	case "fstab":
 		entry, _ := after["entry"].(string)
 		return fmt.Sprintf("sh -c 'grep -qxF %s /etc/fstab || echo %s >> /etc/fstab'", shSingleQuote(entry), shSingleQuote(entry)), nil
