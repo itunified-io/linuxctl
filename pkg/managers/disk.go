@@ -469,8 +469,14 @@ func diskChangeCmd(c Change) (string, error) {
 		}
 		return fmt.Sprintf("mkfs.%s %s %s", fstype, force, after["device"]), nil
 	case "fstab":
+		// Idempotent append. Avoid an inner `sh -c '…'` because the
+		// outer wrapper (e.g. `sudo -n sh -c '…'`) collides with our
+		// single-quoted nested shell. The `||` short-circuit is a
+		// shell construct that works inside the outer sh just fine —
+		// no inner sh needed.
 		entry, _ := after["entry"].(string)
-		return fmt.Sprintf("sh -c 'grep -qxF %s /etc/fstab || echo %s >> /etc/fstab'", shSingleQuote(entry), shSingleQuote(entry)), nil
+		return fmt.Sprintf("grep -qxF %s /etc/fstab || echo %s >> /etc/fstab",
+			shSingleQuote(entry), shSingleQuote(entry)), nil
 	case "mount":
 		return fmt.Sprintf("mount %s", after["mountpoint"]), nil
 	case "error":
