@@ -1,0 +1,30 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: dbx-host
+  category: sysctl
+  tier: community
+  source: |
+    dbx-host kernel tunables. vm.max_map_count is bumped from 65530
+    (default) to 262144 — required by Tempo (grafana/tempo:2.6.0) for
+    block-storage memory mappings; equivalent to Elasticsearch's
+    canonical recommendation. Other values harden the host for the
+    OTEL ingest pipeline (high-fanout TCP from collector + Grafana
+    dashboards) and inotify-heavy Docker volume operations.
+    Per ADR-0109 of itunified-io/infrastructure.
+  version: "2026-04-30"
+spec:
+  sysctl:
+    # Tempo block-storage requires bumped mmap count (canonical 262144 — same
+    # as Elasticsearch). Default 65530 causes Tempo to crash with
+    # "max virtual memory areas vm.max_map_count is too low".
+    - { key: "vm.max_map_count", value: "262144" }
+    # OTEL collector accepts many short-lived TCP connections from
+    # post-tool-use hooks across operator workstations + future fleet.
+    - { key: "net.core.somaxconn", value: "4096" }
+    # Docker bind-mounts + Grafana/Tempo file watches benefit from a
+    # larger inotify ceiling.
+    - { key: "fs.inotify.max_user_watches", value: "524288" }
+    # Conservative IPv4 forwarding off (host is not a router; tunnel
+    # egress goes through cloudflared in host-network mode).
+    - { key: "net.ipv4.ip_forward", value: "0" }

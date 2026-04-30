@@ -1,0 +1,25 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: dbx-host
+  category: users_groups
+  tier: community
+  source: |
+    dbx-host user/group baseline. The 'dbx' system user owns
+    /var/lib/dbx (audit chain, ledger, state). UID/GID pinned at 60001
+    so volume mounts in the docker-compose stack stay deterministic
+    across hosts (see docker/dbx-control/docker-compose.yml).
+    Per ADR-0109 of itunified-io/infrastructure.
+  version: "2026-04-30"
+spec:
+  users_groups:
+    groups:
+      - { name: "dbx", gid: 60001 }
+    users:
+      # System user; no shell. Container processes inside dbx-daemon /
+      # labctl-ledger run as this UID via Docker user mapping. Home is
+      # /var/lib/dbx so the data partition (xfs on dbx_vg/data) is
+      # automatically owned correctly post-mkfs.
+      - { name: "dbx", uid: 60001, gid: "dbx",
+          home: "/var/lib/dbx", shell: "/sbin/nologin",
+          groups: [] }
