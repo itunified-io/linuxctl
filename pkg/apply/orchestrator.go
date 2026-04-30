@@ -149,10 +149,27 @@ func (o *Orchestrator) desiredFor(name string) managers.Spec {
 	case "mount":
 		return o.Linux.Mounts
 	case "user", "package", "dir":
+		// Pass full Linux for preset-aware cast helpers.
+		return o.Linux
+	case "limits":
+		return o.Linux.Limits
+	case "sysctl":
+		return o.Linux.Sysctl
+	case "selinux":
+		return o.Linux.SELinux
+	case "service":
+		return o.Linux.Services
+	case "firewall":
+		return o.Linux.Firewall
+	case "hosts":
+		return o.Linux.HostsEntries
+	case "ssh":
+		// SSH auth pulls keys from UsersGroups; pass full Linux.
 		return o.Linux
 	}
-	// For other managers, pass the full Linux spec — each may ignore.
-	return o.Linux
+	// Unknown manager — pass nil so the cast helper produces an empty
+	// desired state rather than rejecting *config.Linux.
+	return nil
 }
 
 // bindSession attaches o.Session to every manager that supports it. Each
