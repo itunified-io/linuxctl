@@ -4,6 +4,36 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.8 — 2026-04-30
+
+### feat: tag → device resolution for additional disks (#34)
+
+`config.AdditionalDisk` declares either `device:` (explicit path) or
+`tag:` (logical name set in the hypervisor manifest). The doc comment
+on the struct already promised tag-based resolution:
+
+> "non-root disk resolved either by device path or by role tag (which
+> linuxctl looks up in hypervisor.disks)"
+
+…but the disk manager never implemented it: empty `Device` was passed
+to `planDisk` which produced "device not present — hypervisor must
+provision first".
+
+Fix: discovery now enumerates raw disks via `lsblk -bJ -d -o NAME,TYPE,
+FSTYPE,PARTTYPE`, filters TYPE=disk + no FSTYPE + no PARTTYPE + not in
+PVs + no `/sys/class/block/<n>/<n>1` partition node, and sorts the
+result alphabetically (sda, sdb, sdc, …). `PlanLayout` claims raw disks
+from this pool in manifest declaration order whenever an
+`AdditionalDisk` entry has `tag:` set without `device:`. Each claim is
+deterministic so re-runs converge.
+
+A new validation error fires if more `additional` entries are declared
+than there are raw disks available, so the operator can't silently end
+up with unprovisioned LVs.
+
+Live-caught running /lab-up Phase C against ext3 — manifest using
+`tag: "u01"` now resolves to `/dev/sdb` automatically.
+
 ## v2026.04.30.7 — 2026-04-30
 
 ### fix: lvcreate switches to -l for percentage sizes (#32)

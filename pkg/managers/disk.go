@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,6 +73,14 @@ type discovery struct {
 	FSType map[string]string
 	Mounts map[string]string // mount_point → source
 	Fstab  string
+	// RawDisks holds /dev/sdX device paths for whole-disk block devices that
+	// have no partitions, no LVM PV signature, and no filesystem — i.e. the
+	// disks linuxctl is free to claim for additional disk_layout entries.
+	// Sorted alphabetically (sda, sdb, sdc, ...) so claim order is
+	// deterministic when manifests use tags without explicit device paths.
+	// Populated by discoverRawDisks (best-effort; empty slice if lsblk
+	// missing or parse fails).
+	RawDisks []string
 }
 
 func (m *DiskManager) discover(ctx context.Context) (*discovery, error) {
@@ -123,7 +132,54 @@ func (m *DiskManager) discover(ctx context.Context) (*discovery, error) {
 	if b, err := m.Session.ReadFile(ctx, "/etc/fstab"); err == nil {
 		d.Fstab = string(b)
 	}
+	// Raw-disk inventory: every whole block device with no partitions, no
+	// PV signature, and no filesystem. Sorted by KNAME (sda, sdb, sdc, …)
+	// for deterministic claim order. Used by tag→device resolution when an
+	// AdditionalDisk entry sets `tag:` without an explicit `device:`.
+	d.RawDisks = m.discoverRawDisks(ctx, d.PVs)
 	return d, nil
+}
+
+// discoverRawDisks runs `lsblk -bJ -o NAME,TYPE,FSTYPE,PARTTYPE,SIZE -d` on
+// the target and returns the unique /dev/<KNAME> paths that are TYPE=disk
+// AND have no children partitions AND no FSTYPE AND no PARTTYPE AND aren't
+// already an LVM PV. Best-effort: returns nil on any lsblk failure.
+func (m *DiskManager) discoverRawDisks(ctx context.Context, pvs map[string]string) []string {
+	out, _, err := m.Session.Run(ctx, "lsblk -bJ -o NAME,TYPE,FSTYPE,PARTTYPE -d")
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Blockdevices []struct {
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			FSType   string `json:"fstype"`
+			PartType string `json:"parttype"`
+		} `json:"blockdevices"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &doc); jerr != nil {
+		return nil
+	}
+	var raw []string
+	for _, bd := range doc.Blockdevices {
+		if bd.Type != "disk" || bd.FSType != "" || bd.PartType != "" {
+			continue
+		}
+		dev := "/dev/" + bd.Name
+		if _, isPV := pvs[dev]; isPV {
+			continue
+		}
+		// Confirm no partitions exist (lsblk -d hides them, so re-check
+		// via /sys/class/block/<name>/<name>1).
+		cmd := fmt.Sprintf("test ! -d /sys/class/block/%s/%s1 && test ! -d /sys/class/block/%s/%sp1",
+			bd.Name, bd.Name, bd.Name, bd.Name)
+		if _, _, err := m.Session.Run(ctx, cmd); err != nil {
+			continue
+		}
+		raw = append(raw, dev)
+	}
+	sort.Strings(raw)
+	return raw
 }
 
 type findmntTree struct {
@@ -179,8 +235,24 @@ func (m *DiskManager) PlanLayout(ctx context.Context, layout *config.DiskLayout)
 		}
 		changes = append(changes, cs...)
 	}
+	// Resolve tag → device for additional disks that don't set Device
+	// explicitly. Claim raw disks (sda is system, so the first raw disk
+	// here is typically sdb) in declaration order. Already-claimed devices
+	// are removed from the pool so the next entry gets a different one.
+	pool := append([]string(nil), disc.RawDisks...)
 	for _, ad := range layout.Additional {
-		cs, err := m.planDisk(ctx, disc, ad.Device, ad.VGName, ad.LogicalVolumes, false)
+		device := ad.Device
+		if device == "" {
+			if ad.Tag == "" {
+				return nil, fmt.Errorf("disk additional: must set device: or tag:")
+			}
+			if len(pool) == 0 {
+				return nil, fmt.Errorf("disk additional tag=%q: no raw disks available on host (lsblk reported all disks already partitioned/PV/fs); set device: explicitly or provision the disk via the hypervisor first", ad.Tag)
+			}
+			device = pool[0]
+			pool = pool[1:]
+		}
+		cs, err := m.planDisk(ctx, disc, device, ad.VGName, ad.LogicalVolumes, false)
 		if err != nil {
 			return nil, err
 		}
