@@ -1,0 +1,27 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: dbx-host-ubuntu
+  category: bundles
+  tier: community
+  source: |
+    Ubuntu 22.04+ variant of dbx-host. Same agentic-AI control plane
+    layout (dbx-daemon + admin UI + OTEL stack + labctl ledger +
+    litestream + cloudflared + vault-agent), but installed on Ubuntu
+    LTS instead of Oracle Linux. Used by infrastructure/stacks/
+    dbx-control when distro=ubuntu2204.
+
+    Reuses dbx-host directories/users_groups/sysctl/limits presets
+    (all OS-agnostic). Only packages differ: apt names + drop
+    SELinux/firewalld for ufw + AppArmor.
+
+    Per ADR-0109 of itunified-io/infrastructure (agentic-AI hardening
+    master plan Item 11 — Wave C operational capstone).
+  version: "2026-04-30"
+spec:
+  bundle:
+    directories_preset: dbx-host
+    users_groups_preset: dbx-host
+    packages_preset: dbx-host-ubuntu
+    sysctl_preset: dbx-host
+    limits_preset: dbx-host

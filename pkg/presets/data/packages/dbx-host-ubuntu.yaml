@@ -1,0 +1,46 @@
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Preset
+metadata:
+  name: dbx-host-ubuntu
+  category: packages
+  tier: community
+  source: |
+    Ubuntu 22.04+ variant of dbx-host packages.
+
+    dbx-control host packages: Docker (docker.io / docker-ce from
+    Docker's apt repo) + docker-compose-plugin for the container
+    stack (dbx-daemon, OTEL collector, Tempo, Grafana, labctl,
+    litestream, cloudflared); HashiCorp Vault for vault-agent template
+    rendering; chrony for time sync; ufw for the firewall (replaces
+    firewalld which is RHEL-default); cifs-utils for NAS mount;
+    rsync for nightly audit chain mirror; jq + curl + tar + xfsprogs
+    for ops.
+
+    No SELinux equivalents (Ubuntu uses AppArmor; container-selinux
+    + policycoreutils-python-utils have no analogue and are dropped).
+
+    Per ADR-0109 of itunified-io/infrastructure (agentic-AI hardening
+    Item 11 capstone). Companion to dbx-host packages preset (RHEL).
+  version: "2026-04-30"
+spec:
+  packages:
+    install:
+      # Container runtime — apt names from Docker's official repo
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+      # Vault agent (HashiCorp apt repo)
+      - vault
+      # Time + firewall baseline
+      - chrony
+      - ufw
+      # NAS mount + backup
+      - cifs-utils
+      - rsync
+      # Ops
+      - jq
+      - curl
+      - tar
+      - xfsprogs
+      - ca-certificates
