@@ -4,6 +4,24 @@ All notable changes to `linuxctl` are documented in this file. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 CalVer (`vYYYY.MM.DD.TS`).
 
+## v2026.04.30.7 — 2026-04-30
+
+### fix: lvcreate switches to -l for percentage sizes (#32)
+
+DiskManager always emitted `lvcreate -y -n <lv> -L <size> <vg>` regardless
+of whether `size` had a `%` suffix. lvcreate's `-L` flag wants an absolute
+size (`200G`, `4G`, `1T`); percentages like `100%FREE` / `50%VG` / `100%PVS`
+need `-l` instead.
+
+Manifests using `size: "100%"` (the operator-friendly idiom for "fill the
+remaining VG space") errored out with `lvcreate ... -L 100%` exit 3.
+
+Fix: detect `%` in size, switch flag to `-l`, and normalize bare `"N%"`
+to `"N%FREE"` (most useful default — consume unallocated VG extents).
+
+Live-caught running /lab-up Phase C against ext3 — u01 LV creation
+errored at LVM step.
+
 ## v2026.04.30.6 — 2026-04-30
 
 ### feat: oracle-presets aligned with Oracle docs 19c/21c/23ai/26ai (#30)

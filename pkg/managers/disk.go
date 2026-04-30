@@ -367,7 +367,23 @@ func diskChangeCmd(c Change) (string, error) {
 		}
 		return fmt.Sprintf("vgcreate %s %s", after["name"], strings.Join(pvs, " ")), nil
 	case "lvcreate":
-		return fmt.Sprintf("lvcreate -y -n %s -L %s %s", after["name"], after["size"], after["vg"]), nil
+		// lvcreate uses two different size flags:
+		//   -L <size>  → absolute (200G, 4096M, 1T)
+		//   -l <pct>   → relative percentage (100%FREE, 50%VG, 100%PVS)
+		// Manifest values like "100%" or "100%FREE" map to -l; anything else
+		// is treated as absolute and goes to -L. Bare "N%" gets normalized
+		// to "N%FREE" (the most useful default — fill the unallocated space
+		// in the VG).
+		size := fmt.Sprint(after["size"])
+		flag := "-L"
+		val := size
+		if strings.Contains(size, "%") {
+			flag = "-l"
+			if !strings.ContainsAny(size, "FVP") { // FREE, VG, PVS
+				val = strings.TrimRight(size, "%") + "%FREE"
+			}
+		}
+		return fmt.Sprintf("lvcreate -y -n %s %s %s %s", after["name"], flag, val, after["vg"]), nil
 	case "mkfs":
 		return fmt.Sprintf("mkfs.%s -F %s", after["fstype"], after["device"]), nil
 	case "fstab":
