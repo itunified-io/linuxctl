@@ -2,10 +2,28 @@ package config
 
 // Linux is the top-level linux.yaml manifest — the typed Linux layer consumed
 // by the 13 managers.
+//
+// `hosts:` accepts two shapes via custom UnmarshalYAML (issue #48):
+//
+//  1. Legacy selector array — populates `Hosts []HostSpec`:
+//     hosts:
+//       - selector: { role: [db] }
+//         spec: { packages: { install: [chrony] } }
+//
+//  2. proxctl-style map keyed by hostname — populates `HostsByName`:
+//     hosts:
+//       dbx01:
+//         packages: { install: [docker-ce, chrony] }
+//
+// `EffectiveSpec(hostname)` returns the resolved Spec for a given host:
+// when the hostname matches a `HostsByName` key, the host's spec is
+// layered over the top-level Linux fields; otherwise top-level Linux
+// is returned as-is.
 type Linux struct {
 	Kind         string         `yaml:"kind" validate:"required,eq=Linux"`
 	APIVersion   string         `yaml:"apiVersion,omitempty"`
-	Hosts        []HostSpec     `yaml:"hosts,omitempty"`
+	Hosts        []HostSpec     `yaml:"-"` // populated via custom UnmarshalYAML
+	HostsByName  map[string]Spec `yaml:"-"` // populated via custom UnmarshalYAML (proxctl-style)
 	DiskLayout   *DiskLayout    `yaml:"disk_layout,omitempty"`
 	UsersGroups  *UsersGroups   `yaml:"users_groups,omitempty"`
 	Directories  []Directory    `yaml:"directories,omitempty" validate:"dive"`

@@ -1,4 +1,34 @@
 # Changelog
+## v2026.05.01.1 — 2026-05-01
+
+### feat(config): accept proxctl-style hosts map in linux.yaml (#48)
+
+`hosts:` in linux.yaml now accepts both shapes:
+
+1. **Legacy selector array** (existing): `hosts: [{selector: {role: [db]}, spec: {...}}]` → populates `Linux.Hosts []HostSpec`
+2. **proxctl-style map** (NEW): `hosts: {dbx01: {packages: {install: [...]}}}` → populates `Linux.HostsByName map[string]Spec`
+
+Custom `Linux.UnmarshalYAML` dispatches on the YAML node kind (sequence vs
+mapping) and decodes into the appropriate field. Both fields are
+consulted at runtime; only one is non-empty for a given manifest.
+
+New `Linux.EffectiveSpec(hostname)` helper resolves the spec for a given
+`--host` flag value: when the hostname matches a `HostsByName` key, the
+host's spec is layered over top-level Linux fields (host wins); otherwise
+top-level Linux is returned as-is. Slices and pointers replace rather than
+merge — explicit operator override semantics.
+
+Operators authoring stacks in the proxctl env.yaml convention (
+`hosts: <hostname>: {...}` mirroring `spec.hypervisor.nodes`) can now
+share that file shape between proxctl + linuxctl with no rewrite.
+
+8 new unit tests; full test suite green (no regression).
+
+Closes #48. Capstone follow-up #1 from infrastructure ADR-0109. Note: the
+proxctl manifest schema also includes fields not yet on linuxctl Spec
+(timezone, keymap, hostname, packages.present alias, services.enabled
+list shape) — full schema reconciliation tracked separately.
+
 ## v2026.04.30.11 — 2026-04-30
 
 ### feat: dbx-host bundle preset (#44)
