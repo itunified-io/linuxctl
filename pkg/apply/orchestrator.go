@@ -56,6 +56,10 @@ type Orchestrator struct {
 	Managers        []managers.Manager
 	DryRun          bool
 	ContinueOnError bool
+	// ReformatFilesystems is forwarded to DiskManager during bindSession so
+	// `linuxctl --reformat-filesystems apply apply` opts in to destructive
+	// mkfs on mismatched filesystems (linuxctl#52). Default false.
+	ReformatFilesystems bool
 
 	// applied records, per manager name, the changes we applied in the last
 	// successful Apply. Used by Rollback.
@@ -184,7 +188,7 @@ func (o *Orchestrator) bindSession(m managers.Manager) managers.Manager {
 	}
 	switch v := m.(type) {
 	case *managers.DiskManager:
-		return v.WithSession(o.Session)
+		return v.WithSession(o.Session).WithReformatFilesystems(o.ReformatFilesystems)
 	case *managers.MountManager:
 		return v.WithSession(o.Session)
 	case *managers.UserManager:

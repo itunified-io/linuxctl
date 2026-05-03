@@ -274,6 +274,130 @@ func TestDiskManager_Rollback(t *testing.T) {
 	}
 }
 
+// ---- mkfs idempotency (linuxctl#52) --------------------------------------
+
+// existingLVMock builds a mock with one LV (datavg/data) already present and
+// blkid returning the supplied filesystem type for /dev/datavg/data.
+func existingLVMock(blkidFS string) *fullMockSession {
+	ms := newFullMock().
+		on("pvs", `{"report":[{"pv":[{"pv_name":"/dev/sdb","vg_name":"datavg"}]}]}`, nil).
+		on("vgs", `{"report":[{"vg":[{"vg_name":"datavg"}]}]}`, nil).
+		on("lvs", `{"report":[{"lv":[{"lv_name":"data","vg_name":"datavg"}]}]}`, nil).
+		on("findmnt", `{"filesystems":[]}`, nil).
+		on("blkid -o value -s TYPE /dev/datavg/data", blkidFS, nil)
+	ms.exists["/dev/sdb"] = true
+	return ms
+}
+
+// TestDiskManager_Plan_MkfsSkipsExistingMatchingFS — when the LV already has
+// the requested filesystem, mkfs is omitted from the plan. linuxctl#52.
+func TestDiskManager_Plan_MkfsSkipsExistingMatchingFS(t *testing.T) {
+	ms := existingLVMock("xfs")
+	d := NewDiskManager().WithSession(ms)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{
+			{Device: "/dev/sdb", VGName: "datavg",
+				LogicalVolumes: []config.LogicalVolume{
+					{Name: "data", Size: "10G", FS: "xfs", MountPoint: "/data"},
+				}},
+		},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatalf("PlanLayout: %v", err)
+	}
+	for _, c := range changes {
+		after, _ := c.After.(map[string]any)
+		if op, _ := after["op"].(string); op == "mkfs" {
+			t.Errorf("did not expect mkfs when filesystem already matches; got change: %+v", c)
+		}
+	}
+}
+
+// TestDiskManager_Plan_MkfsErrorsOnMismatch — when the LV holds ext4 but the
+// manifest demands xfs, Plan returns an error with the remediation hint.
+// linuxctl#52.
+func TestDiskManager_Plan_MkfsErrorsOnMismatch(t *testing.T) {
+	ms := existingLVMock("ext4")
+	d := NewDiskManager().WithSession(ms)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{
+			{Device: "/dev/sdb", VGName: "datavg",
+				LogicalVolumes: []config.LogicalVolume{
+					{Name: "data", Size: "10G", FS: "xfs", MountPoint: "/data"},
+				}},
+		},
+	}
+	_, err := d.PlanLayout(context.Background(), layout)
+	if err == nil {
+		t.Fatal("expected error for mismatched filesystem; got nil")
+	}
+	for _, want := range []string{"ext4", "xfs", "--reformat-filesystems"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error message missing %q: %v", want, err)
+		}
+	}
+}
+
+// TestDiskManager_Plan_MkfsProceedsWhenNoFS — no existing filesystem ⇒ mkfs is
+// emitted as before. linuxctl#52.
+func TestDiskManager_Plan_MkfsProceedsWhenNoFS(t *testing.T) {
+	ms := existingLVMock("") // blkid returns nothing → no FS
+	d := NewDiskManager().WithSession(ms)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{
+			{Device: "/dev/sdb", VGName: "datavg",
+				LogicalVolumes: []config.LogicalVolume{
+					{Name: "data", Size: "10G", FS: "xfs", MountPoint: "/data"},
+				}},
+		},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatalf("PlanLayout: %v", err)
+	}
+	found := false
+	for _, c := range changes {
+		after, _ := c.After.(map[string]any)
+		if op, _ := after["op"].(string); op == "mkfs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected mkfs change when no filesystem exists; got: %+v", changes)
+	}
+}
+
+// TestDiskManager_Plan_ReformatFilesystemsOverridesMismatch — operator opts in
+// to destructive reformat via WithReformatFilesystems(true). Plan no longer
+// errors; mkfs is emitted. linuxctl#52.
+func TestDiskManager_Plan_ReformatFilesystemsOverridesMismatch(t *testing.T) {
+	ms := existingLVMock("ext4")
+	d := NewDiskManager().WithSession(ms).WithReformatFilesystems(true)
+	layout := &config.DiskLayout{
+		Additional: []config.AdditionalDisk{
+			{Device: "/dev/sdb", VGName: "datavg",
+				LogicalVolumes: []config.LogicalVolume{
+					{Name: "data", Size: "10G", FS: "xfs", MountPoint: "/data"},
+				}},
+		},
+	}
+	changes, err := d.PlanLayout(context.Background(), layout)
+	if err != nil {
+		t.Fatalf("PlanLayout (reformat opt-in): %v", err)
+	}
+	found := false
+	for _, c := range changes {
+		after, _ := c.After.(map[string]any)
+		if op, _ := after["op"].(string); op == "mkfs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected mkfs change with --reformat-filesystems; got: %+v", changes)
+	}
+}
+
 func TestDiskManager_Name(t *testing.T) {
 	if NewDiskManager().Name() != "disk" {
 		t.Errorf("wrong name")

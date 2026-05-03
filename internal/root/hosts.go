@@ -1,30 +1,32 @@
 package root
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
+// newHostsCmd wires the hosts subsystem CLI to the registered HostsManager via
+// the shared runManager helper. Reads `hosts_entries:` from linux.yaml; edits
+// /etc/hosts between `# BEGIN linuxctl` / `# END linuxctl` markers idempotently
+// (linuxctl#51 — Phase C blocker for /lab-up).
 func newHostsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "hosts",
-		Short: "Manage hosts state (plan / apply / verify)",
+		Use:   "hosts [env.yaml|linux.yaml]",
+		Short: "Manage /etc/hosts state (plan / apply / verify)",
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "plan",
-		Short: "Preview hosts changes against the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("hosts plan: not implemented") },
+		Use:   "plan [env.yaml|linux.yaml]",
+		Short: "Preview /etc/hosts changes against the desired state",
+		RunE:  runManager("hosts", actionPlan),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "apply",
-		Short: "Apply hosts changes to reach the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("hosts apply: not implemented") },
+		Use:   "apply [env.yaml|linux.yaml]",
+		Short: "Apply /etc/hosts changes (rewrites managed block only)",
+		RunE:  runManager("hosts", actionApply),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "verify",
-		Short: "Verify observed hosts state matches desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("hosts verify: not implemented") },
+		Use:   "verify [env.yaml|linux.yaml]",
+		Short: "Verify observed /etc/hosts managed block matches desired state",
+		RunE:  runManager("hosts", actionVerify),
 	})
 	return cmd
 }

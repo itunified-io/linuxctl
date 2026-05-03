@@ -18,8 +18,21 @@ import (
 //
 // Safety: DiskManager only creates. It never removes PVs/VGs/LVs or reshapes
 // existing filesystems. Rollback reverses in-session creations only.
+//
+// mkfs idempotency (linuxctl#52): Plan probes blkid on each desired LV. If
+// the existing filesystem matches the manifest `fs:` value, mkfs is skipped.
+// If a different filesystem is present, Plan returns an error with the
+// remediation hint to set --reformat-filesystems (a.k.a.
+// DiskManager.ReformatFilesystems = true). If no filesystem is present, mkfs
+// proceeds as before.
 type DiskManager struct {
 	Session session.Session
+
+	// ReformatFilesystems opts in to destructive mkfs over an existing,
+	// mismatched filesystem (e.g. ext4 found where manifest says xfs).
+	// Default false → Plan errors with remediation. Wired from the global
+	// `--reformat-filesystems` flag in internal/root. linuxctl#52.
+	ReformatFilesystems bool
 }
 
 // NewDiskManager returns a disk manager bound to sess. sess may be nil for
@@ -30,6 +43,14 @@ func NewDiskManager() *DiskManager { return &DiskManager{} }
 func (m *DiskManager) WithSession(sess session.Session) *DiskManager {
 	cp := *m
 	cp.Session = sess
+	return &cp
+}
+
+// WithReformatFilesystems returns a copy of m with ReformatFilesystems
+// overridden. Used by `linuxctl --reformat-filesystems …` callers (linuxctl#52).
+func (m *DiskManager) WithReformatFilesystems(b bool) *DiskManager {
+	cp := *m
+	cp.ReformatFilesystems = b
 	return &cp
 }
 
@@ -120,6 +141,18 @@ func (m *DiskManager) discover(ctx context.Context) (*discovery, error) {
 			for _, rep := range r.Report {
 				for _, lv := range rep.LV {
 					d.LVs[lv.VGName+"/"+lv.LVName] = true
+					// Probe filesystem on each LV via blkid. The
+					// device path is the canonical /dev/<vg>/<lv>
+					// symlink. blkid prints "TYPE=\"xfs\"" on
+					// stdout when a filesystem is present and
+					// exits non-zero (and prints nothing) when
+					// the LV has no signature. We tolerate both
+					// outcomes silently — only successful TYPE=
+					// matches are recorded. linuxctl#52.
+					dev := "/dev/" + lv.VGName + "/" + lv.LVName
+					if fs := probeFSType(ctx, m.Session, dev); fs != "" {
+						d.FSType[dev] = fs
+					}
 				}
 			}
 		}
@@ -319,15 +352,34 @@ func (m *DiskManager) planDisk(ctx context.Context, disc *discovery, device, vg 
 				RollbackCmd: fmt.Sprintf("lvremove -f -y %s", dev),
 			})
 		}
-		// FS (we don't know fs-by-device without blkid; conservative: always plan mkfs if LV is new).
-		changes = append(changes, Change{
-			Manager:     "disk",
-			Target:      dev,
-			Action:      "create",
-			Hazard:      HazardDestructive,
-			After:       map[string]any{"op": "mkfs", "device": dev, "fstype": lv.FS},
-			RollbackCmd: "",
-		})
+		// FS — gate mkfs by blkid probe (linuxctl#52). Discovery
+		// populates disc.FSType via blkid for every existing LV.
+		//
+		//   - existing FS == manifest fs:  → skip mkfs (idempotent)
+		//   - existing FS != manifest fs:  → error unless ReformatFilesystems
+		//   - no existing FS              → mkfs (original behaviour)
+		existingFS := disc.FSType[dev]
+		switch {
+		case existingFS == lv.FS:
+			// Already correct — emit nothing for the FS step. Test
+			// observability is preserved via disc.FSType[dev].
+		case existingFS != "" && existingFS != lv.FS && !m.ReformatFilesystems:
+			return nil, fmt.Errorf(
+				"disk: %s already has filesystem %q but manifest requests %q; "+
+					"refusing to reformat without --reformat-filesystems "+
+					"(this would destroy existing data)",
+				dev, existingFS, lv.FS)
+		default:
+			// no FS, or operator opted in via --reformat-filesystems
+			changes = append(changes, Change{
+				Manager:     "disk",
+				Target:      dev,
+				Action:      "create",
+				Hazard:      HazardDestructive,
+				After:       map[string]any{"op": "mkfs", "device": dev, "fstype": lv.FS},
+				RollbackCmd: "",
+			})
+		}
 		if lv.MountPoint != "" {
 			// fstab entry.
 			fstabLine := fmt.Sprintf("%s %s %s %s 0 0", dev, lv.MountPoint, lv.FS, "defaults")
@@ -527,6 +579,28 @@ func defaultStr(s, dflt string) string {
 
 func shSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// probeFSType returns the filesystem type reported by blkid for dev, or "" if
+// no signature is present (or blkid is unavailable). Used by disk.Plan to
+// gate mkfs idempotency (linuxctl#52).
+//
+// Output of `blkid -o value -s TYPE /dev/<dev>`:
+//
+//	xfs       → existing xfs filesystem
+//	ext4      → existing ext4 filesystem
+//	(empty)   → no filesystem signature
+//
+// blkid exits non-zero on no-signature; we treat any error as "no fs" rather
+// than a hard failure. The Session interface returns combined-stderr in the
+// error case, but we only care about the trimmed stdout.
+func probeFSType(ctx context.Context, sess session.Session, dev string) string {
+	if sess == nil {
+		return ""
+	}
+	cmd := fmt.Sprintf("blkid -o value -s TYPE %s 2>/dev/null || true", dev)
+	out, _, _ := sess.RunSudo(ctx, cmd)
+	return strings.TrimSpace(out)
 }
 
 func init() { Register(NewDiskManager()) }

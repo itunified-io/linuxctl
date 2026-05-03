@@ -134,21 +134,44 @@ func deadlineCtx() (context.Context, context.CancelFunc) {
 // method (any signature accepting a session.Session), we call it via type
 // switch on the known concrete types. Unknown managers pass through.
 func bindSession(m managers.Manager, sess session.Session) managers.Manager {
+	if sess == nil {
+		return m
+	}
+	// Mirror the orchestrator's bindSession (pkg/apply/orchestrator.go) so
+	// every per-subsystem CLI command (`linuxctl hosts apply`, `linuxctl
+	// firewall apply`, …) gets a session-bound manager. Without this, single-
+	// manager invocations bypass session wiring and fail at Plan/Apply with
+	// session-required errors (linuxctl#51).
 	switch v := m.(type) {
-	case interface {
-		WithSession(session.Session) *managers.DiskManager
-	}:
+	case *managers.DiskManager:
+		// Honor --reformat-filesystems on every disk-manager invocation
+		// (single-manager CLI + orchestrator alike). linuxctl#52.
+		return v.WithSession(sess).WithReformatFilesystems(gf.reformatFilesystems)
+	case *managers.MountManager:
 		return v.WithSession(sess)
-	case interface {
-		WithSession(session.Session) *managers.MountManager
-	}:
+	case *managers.UserManager:
+		return v.WithSession(sess)
+	case *managers.PackageManager:
+		return v.WithSession(sess)
+	case *managers.DirManager:
+		return v.WithSession(sess)
+	case *managers.LimitsManager:
+		return v.WithSession(sess)
+	case *managers.SELinuxManager:
+		return v.WithSession(sess)
+	case *managers.SysctlManager:
+		return v.WithSession(sess)
+	case *managers.ServiceManager:
+		return v.WithSession(sess)
+	case *managers.FirewallManager:
+		return v.WithSession(sess)
+	case *managers.HostsManager:
+		return v.WithSession(sess)
+	case *managers.NetworkManager:
+		return v.WithSession(sess)
+	case *managers.SSHAuthManager:
 		return v.WithSession(sess)
 	}
-	// Try a broader reflective-style match via known signatures of other
-	// managers. Since we can't import their concrete types without an import
-	// cycle, we rely on the interface-based dispatch above plus fallthrough
-	// for managers that wire their session through package-level globals or
-	// managers.All().
 	return m
 }
 
@@ -169,6 +192,16 @@ func desiredFor(linux *config.Linux, name string) managers.Spec {
 		return linux.Directories
 	case "package":
 		return packagesSpec(linux.Packages)
+	case "hosts":
+		// HostsManager.castHostEntries accepts both *config.Linux and
+		// []config.HostEntry; pass the slice directly so an empty
+		// hosts_entries: produces a clean no-op plan rather than the
+		// whole Linux struct dragging in unrelated fields. linuxctl#51.
+		return linux.HostsEntries
+	case "firewall":
+		// FirewallManager.castFirewall accepts *config.Firewall directly.
+		// Pass the typed pointer (may be nil → no-op plan). linuxctl#51.
+		return linux.Firewall
 	}
 	return linux
 }

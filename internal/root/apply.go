@@ -50,6 +50,7 @@ func runApply(action mgrAction) func(*cobra.Command, []string) error {
 		defer sess.Close()
 
 		orch := apply.New(nil, sess, gf.dryRun).WithLinux(linux)
+		orch.ReformatFilesystems = gf.reformatFilesystems
 
 		ctx, cancel := deadlineCtx()
 		defer cancel()
