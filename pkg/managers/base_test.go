@@ -51,6 +51,8 @@ func TestAllManagers_DependsOn(t *testing.T) {
 		"ssh":      {deps: []string{"user"}},
 		"sysctl":   {deps: nil},
 		"user":     {deps: []string{"package"}},
+		"repo":     {deps: nil},
+		"file":     {deps: nil},
 	}
 
 	all := All()

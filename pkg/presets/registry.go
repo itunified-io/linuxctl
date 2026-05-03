@@ -144,6 +144,41 @@ func BundleExpand(name string, tierFn TierFunc) (map[string]string, error) {
 	return out, nil
 }
 
+// BundleInlineExpand returns the inline capabilities (repos_enable + files)
+// declared on a bundle. Both lists may be empty / nil for bundles that do
+// not use inline capabilities. Tier-gating mirrors BundleExpand.
+//
+// The Bundle struct already decodes both fields during load(); this helper
+// converts the registry-internal FileSpec into the config-package shape so
+// callers in pkg/config can consume the result without an import cycle.
+func BundleInlineExpand(name string, tierFn TierFunc) ([]string, []config.FileSpec, error) {
+	p, err := ResolveCategory("bundles", name, tierFn)
+	if err != nil {
+		return nil, nil, err
+	}
+	if p.Kind != "Bundle" {
+		return nil, nil, fmt.Errorf("preset %q is not a Bundle (kind=%q)", name, p.Kind)
+	}
+	idx, _ := load()
+	b, ok := idx.bundles[name]
+	if !ok {
+		return nil, nil, fmt.Errorf("bundle %q: internal: not in bundle index", name)
+	}
+	repos := append([]string(nil), b.ReposEnable...)
+	files := make([]config.FileSpec, 0, len(b.Files))
+	for _, f := range b.Files {
+		files = append(files, config.FileSpec{
+			Path:       f.Path,
+			Mode:       f.Mode,
+			Owner:      f.Owner,
+			Group:      f.Group,
+			ContentB64: f.ContentB64,
+			CreateOnly: f.CreateOnly,
+		})
+	}
+	return repos, files, nil
+}
+
 // ---- Typed spec decoders ---------------------------------------------------
 //
 // These helpers decode a preset's RawSpec into the concrete Go types the

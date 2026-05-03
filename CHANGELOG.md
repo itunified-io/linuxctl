@@ -1,4 +1,47 @@
 # Changelog
+## v2026.05.03.3 — 2026-05-03
+
+### feat(presets): bundle repos_enable + files capabilities (#57 v2 — full closure)
+
+Closes the OL9 Oracle 19c prerequisite gap that the v1 PR (#58) left as
+out-of-scope. The `Bundle` schema now carries two inline capabilities
+alongside the existing per-category `*_preset` references:
+
+- `repos_enable: []` — list of dnf repository IDs that the new `repo`
+  manager idempotently enables via `dnf config-manager --set-enabled`.
+- `files: []` — list of `FileSpec` literal payloads that the new `file`
+  manager writes (base64-encoded body, mode/owner/group, optional
+  `create_only` for stub files that must defer to a later real
+  implementation).
+
+**New managers** — both implement the full `Manager` contract
+(plan / apply / verify / rollback) with idempotent re-apply:
+
+- `pkg/managers/repo.go` — RepoManager (12 unit tests)
+- `pkg/managers/file.go` — FileManager (13 unit tests)
+- CLI: `linuxctl repo {plan,apply,verify}` + `linuxctl file
+  {plan,apply,verify}` mirroring the firewall + hosts subcommand shape.
+
+**Schema + loader** — `config.Linux` gains `ReposEnable []string` +
+`Files []FileSpec`. The bundle expander surfaces inline lists via a
+companion `BundleInlineExpander` hook so `pkg/config` stays free of a
+`pkg/presets` import. Explicit manifest entries union with
+bundle-supplied entries; explicit wins on natural-key collision (repo
+ID / file path).
+
+**`oracle-single-19c` bundle now declares:**
+
+- `repos_enable: [ol9_codeready_builder]` — provides build-time deps
+  (libnsl, glibc-devel split-outs) that runInstaller's link step needs
+  on OL9 but `oracle-database-preinstall-19c` does not pull.
+- `files: [/usr/lib64/libpthread_nonshared.a]` — empty `ar` archive
+  stub (`!<arch>\n`, 8 bytes) that satisfies runInstaller's
+  `-lpthread_nonshared` link flag without polluting the runtime;
+  `create_only: true` so a later real RPM is not clobbered.
+
+**Tests:** 33 new unit tests across schema parse, repo manager,
+file manager, CLI wiring, and oracle-single-19c integration.
+
 ## v2026.05.03.2 — 2026-05-03
 
 ### feat(presets): oracle-single-19c OL9 prereqs (gcc, gcc-c++, make, binutils) (#57)

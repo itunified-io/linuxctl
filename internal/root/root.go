@@ -128,6 +128,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	cmd.AddCommand(newSSHCmd())
 	cmd.AddCommand(newSELinuxCmd())
 	cmd.AddCommand(newDirCmd())
+	cmd.AddCommand(newRepoCmd())
+	cmd.AddCommand(newFileCmd())
 
 	// Orchestrator + observation.
 	cmd.AddCommand(newApplyCmd())

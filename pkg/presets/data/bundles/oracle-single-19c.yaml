@@ -5,7 +5,7 @@ metadata:
   category: bundles
   tier: community
   source: "Oracle Database 19c single-instance baseline"
-  version: "2026-04-22"
+  version: "2026-05-03"
 spec:
   bundle:
     directories_preset: oracle-ofa-19c
@@ -13,3 +13,32 @@ spec:
     packages_preset: oracle-19c
     sysctl_preset: oracle-19c
     limits_preset: oracle-19c
+    # OL9 Oracle 19c build-time prereqs (linuxctl#57).
+    #
+    # ol9_codeready_builder ships build-only deps that
+    # oracle-database-preinstall-19c does not depend on but runInstaller's
+    # link step needs (libnsl, glibc-devel split-outs, etc.). The repo
+    # exists on every OL9 host but is shipped DISABLED by default.
+    repos_enable:
+      - ol9_codeready_builder
+
+    # /usr/lib64/libpthread_nonshared.a stub.
+    #
+    # On glibc ≥ 2.34 (RHEL 9 / OL 9) the legacy non-shared libpthread
+    # stub was split out and removed from the headline glibc-devel
+    # package. runInstaller's genclntsh link command still passes
+    # `-lpthread_nonshared` and aborts with an unresolved-symbol error
+    # in the absence of the file.
+    #
+    # The 8-byte payload below is a properly-formed empty `ar` archive
+    # (`!<arch>\n`) — `ld` accepts it and contributes nothing to the
+    # final binary, satisfying the linker without polluting the runtime.
+    # CreateOnly=true so that if Oracle ever ships a real implementation
+    # in a later RPM, the stub is not clobbered.
+    files:
+      - path: /usr/lib64/libpthread_nonshared.a
+        mode: "0644"
+        owner: root
+        group: root
+        content_b64: "ITxhcmNoPgo="
+        create_only: true

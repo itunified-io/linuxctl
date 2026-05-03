@@ -14,38 +14,111 @@ import (
 // RegisterBundleExpander() in its init().
 type BundleExpander func(name string) (map[string]string, error)
 
-var bundleExpander BundleExpander
+// BundleInlineExpander returns inline-capability data carried by a bundle
+// (repos_enable + files). Optional companion to BundleExpander introduced
+// in linuxctl#57. Loader gracefully tolerates a nil expander (older
+// pkg/presets versions).
+type BundleInlineExpander func(name string) (repos []string, files []FileSpec, err error)
+
+var (
+	bundleExpander       BundleExpander
+	bundleInlineExpander BundleInlineExpander
+)
 
 // RegisterBundleExpander wires an expander. pkg/presets calls this from init.
 func RegisterBundleExpander(fn BundleExpander) { bundleExpander = fn }
+
+// RegisterBundleInlineExpander wires the inline-capability expander.
+func RegisterBundleInlineExpander(fn BundleInlineExpander) { bundleInlineExpander = fn }
 
 // expandBundleOnLinux fills the per-category *_preset fields from the named
 // bundle, but only for fields the user left empty. Explicit per-category
 // presets always win over the bundle.
 func expandBundleOnLinux(l *Linux) error {
-	if l == nil || l.BundlePreset == "" || bundleExpander == nil {
+	if l == nil || l.BundlePreset == "" {
 		return nil
 	}
-	children, err := bundleExpander(l.BundlePreset)
-	if err != nil {
-		return fmt.Errorf("bundle %q: %w", l.BundlePreset, err)
+	if bundleExpander != nil {
+		children, err := bundleExpander(l.BundlePreset)
+		if err != nil {
+			return fmt.Errorf("bundle %q: %w", l.BundlePreset, err)
+		}
+		if l.DirectoriesPreset == "" {
+			l.DirectoriesPreset = children["directories"]
+		}
+		if l.UsersGroupsPreset == "" {
+			l.UsersGroupsPreset = children["users_groups"]
+		}
+		if l.PackagesPreset == "" {
+			l.PackagesPreset = children["packages"]
+		}
+		if l.SysctlPreset == "" {
+			l.SysctlPreset = children["sysctl"]
+		}
+		if l.LimitsPreset == "" {
+			l.LimitsPreset = children["limits"]
+		}
 	}
-	if l.DirectoriesPreset == "" {
-		l.DirectoriesPreset = children["directories"]
-	}
-	if l.UsersGroupsPreset == "" {
-		l.UsersGroupsPreset = children["users_groups"]
-	}
-	if l.PackagesPreset == "" {
-		l.PackagesPreset = children["packages"]
-	}
-	if l.SysctlPreset == "" {
-		l.SysctlPreset = children["sysctl"]
-	}
-	if l.LimitsPreset == "" {
-		l.LimitsPreset = children["limits"]
+	// Inline capabilities (linuxctl#57). Explicit manifest entries are
+	// retained; bundle entries are unioned in. Repo IDs dedup on string
+	// equality; FileSpec entries dedup on absolute path with explicit
+	// winning on collision.
+	if bundleInlineExpander != nil {
+		repos, files, err := bundleInlineExpander(l.BundlePreset)
+		if err != nil {
+			return fmt.Errorf("bundle %q (inline): %w", l.BundlePreset, err)
+		}
+		l.ReposEnable = mergeReposEnable(l.ReposEnable, repos)
+		l.Files = mergeFiles(l.Files, files)
 	}
 	return nil
+}
+
+// mergeReposEnable returns the union of explicit + bundle repo IDs,
+// preserving explicit-first ordering and removing duplicates.
+func mergeReposEnable(explicit, bundle []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(explicit)+len(bundle))
+	for _, r := range explicit {
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	for _, r := range bundle {
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// mergeFiles returns the union of explicit + bundle file specs keyed by
+// absolute path; explicit wins on collision.
+func mergeFiles(explicit, bundle []FileSpec) []FileSpec {
+	byPath := map[string]FileSpec{}
+	order := []string{}
+	for _, f := range explicit {
+		if _, dup := byPath[f.Path]; !dup {
+			order = append(order, f.Path)
+		}
+		byPath[f.Path] = f
+	}
+	for _, f := range bundle {
+		if _, has := byPath[f.Path]; has {
+			continue
+		}
+		byPath[f.Path] = f
+		order = append(order, f.Path)
+	}
+	out := make([]FileSpec, 0, len(order))
+	for _, p := range order {
+		out = append(out, byPath[p])
+	}
+	return out
 }
 
 // LoadLinux reads and decodes a linux.yaml from disk without validation.

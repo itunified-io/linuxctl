@@ -9,4 +9,7 @@ func init() {
 	config.RegisterBundleExpander(func(name string) (map[string]string, error) {
 		return BundleExpand(name, nil)
 	})
+	config.RegisterBundleInlineExpander(func(name string) ([]string, []config.FileSpec, error) {
+		return BundleInlineExpand(name, nil)
+	})
 }
