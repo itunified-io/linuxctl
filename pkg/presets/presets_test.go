@@ -307,6 +307,94 @@ func TestEmbeddedPresets_Oracle19cLimitsByteForByte(t *testing.T) {
 	}
 }
 
+// TestEmbeddedPresets_OracleSingle_HasGridUser is a regression gate for
+// linuxctl#53. /lab-up Phase D.1 (oracle-asm-configure) and Phase D.2
+// (oracle-grid-install) both need the grid user to own GRID_HOME and run
+// asmca / runInstaller. The oracle-single preset (used by every
+// oracle-single-* bundle) MUST ship with both oracle + grid users; with the
+// correct ASM groups; and oracle MUST NOT be in asmadmin or asmoper (those
+// are reserved for grid).
+func TestEmbeddedPresets_OracleSingle_HasGridUser(t *testing.T) {
+	p, err := ResolveCategory("users_groups", "oracle-single", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ug, err := UsersGroupsSpec(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Index users + groups for assertions.
+	users := map[string]int{}
+	for _, u := range ug.Users {
+		users[u.Name] = u.UID
+	}
+	groups := map[string]int{}
+	for _, g := range ug.Groups {
+		groups[g.Name] = g.GID
+	}
+
+	// Grid user — required for ASM/Oracle Restart.
+	gridUID, hasGrid := users["grid"]
+	if !hasGrid {
+		t.Fatal("oracle-single: missing grid user — Phase D.1/D.2 will fail")
+	}
+	if gridUID != 54322 {
+		t.Errorf("oracle-single: grid uid want 54322, got %d", gridUID)
+	}
+
+	// Oracle user — must remain present.
+	if _, ok := users["oracle"]; !ok {
+		t.Fatal("oracle-single: missing oracle user")
+	}
+
+	// Required ASM groups (Oracle 19c standard GIDs).
+	for name, wantGID := range map[string]int{
+		"asmadmin": 54327,
+		"asmdba":   54328,
+		"asmoper":  54329,
+	} {
+		got, ok := groups[name]
+		if !ok {
+			t.Errorf("oracle-single: missing ASM group %q", name)
+			continue
+		}
+		if got != wantGID {
+			t.Errorf("oracle-single: %s gid want %d, got %d", name, wantGID, got)
+		}
+	}
+
+	// Oracle user MUST NOT be in asmadmin / asmoper — those are grid-only.
+	for _, u := range ug.Users {
+		if u.Name != "oracle" {
+			continue
+		}
+		for _, g := range u.Groups {
+			if g == "asmadmin" || g == "asmoper" {
+				t.Errorf("oracle-single: oracle user MUST NOT be in %q (reserved for grid)", g)
+			}
+		}
+	}
+
+	// Grid user MUST be in asmadmin/asmdba/asmoper/dba.
+	for _, u := range ug.Users {
+		if u.Name != "grid" {
+			continue
+		}
+		want := map[string]bool{"asmadmin": false, "asmdba": false, "asmoper": false, "dba": false}
+		for _, g := range u.Groups {
+			if _, ok := want[g]; ok {
+				want[g] = true
+			}
+		}
+		for g, found := range want {
+			if !found {
+				t.Errorf("oracle-single: grid user missing required supplementary group %q", g)
+			}
+		}
+	}
+}
+
 func TestResolve_AmbiguousName(t *testing.T) {
 	// oracle-19c exists in packages, sysctl, limits → ambiguous.
 	if _, err := Resolve("oracle-19c", nil); err == nil {

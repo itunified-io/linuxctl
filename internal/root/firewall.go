@@ -1,30 +1,32 @@
 package root
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
+// newFirewallCmd wires the firewall subsystem CLI to the registered
+// FirewallManager via the shared runManager helper. Reads `firewall:` from
+// linux.yaml; reconciles ports + sources per zone (firewalld / ufw / nftables).
+// linuxctl#51 — Phase C blocker for /lab-up.
 func newFirewallCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "firewall",
-		Short: "Manage firewall state (plan / apply / verify)",
+		Use:   "firewall [env.yaml|linux.yaml]",
+		Short: "Manage host firewall state (plan / apply / verify)",
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "plan",
+		Use:   "plan [env.yaml|linux.yaml]",
 		Short: "Preview firewall changes against the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("firewall plan: not implemented") },
+		RunE:  runManager("firewall", actionPlan),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "apply",
-		Short: "Apply firewall changes to reach the desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("firewall apply: not implemented") },
+		Use:   "apply [env.yaml|linux.yaml]",
+		Short: "Apply firewall changes (idempotent: only adds missing ports/sources)",
+		RunE:  runManager("firewall", actionApply),
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "verify",
-		Short: "Verify observed firewall state matches desired state",
-		RunE:  func(_ *cobra.Command, _ []string) error { return fmt.Errorf("firewall verify: not implemented") },
+		Use:   "verify [env.yaml|linux.yaml]",
+		Short: "Verify observed firewall ports/sources match desired state",
+		RunE:  runManager("firewall", actionVerify),
 	})
 	return cmd
 }

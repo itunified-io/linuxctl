@@ -8,22 +8,39 @@ metadata:
     Oracle Database single-instance install with role-separation
     (Oracle DB owner + Grid Infrastructure owner). Aligns with the
     Oracle Database 19c Linux Install Guide §6 "Creating Operating
-    System Privileges Groups, Users, and Directories".
-    Even single-instance installs need 'grid' for ASM/Oracle Restart.
-  version: "2026-04-30"
+    System Privileges Groups, Users, and Directories"
+    (https://docs.oracle.com/en/database/oracle/oracle-database/19/ladbi/about-oracle-installation-user-accounts.html).
+
+    GIDs follow Oracle's documented defaults so RPM-installed binaries
+    that hard-code numeric IDs (oracle-database-preinstall-19c) stay
+    in alignment with our manually managed users.
+
+    Even single-instance installs need 'grid' for ASM / Oracle Restart;
+    asmca + runInstaller in /lab-up Phase D.1+D.2 require this user
+    to exist before they execute (linuxctl#53).
+  version: "2026-05-03"
 spec:
   users_groups:
     groups:
       - { name: "oinstall", gid: 54321 }   # OINSTALL — Oracle Inventory
-      - { name: "dba",      gid: 54322 }   # OSDBA  — DB administrators
-      - { name: "asmadmin", gid: 54323 }   # OSASM  — ASM administrators
-      - { name: "asmdba",   gid: 54324 }   # OSDBA for ASM
-      - { name: "asmoper",  gid: 54325 }   # OSOPER for ASM
+      - { name: "dba",      gid: 54322 }   # OSDBA   — DB administrators
+      - { name: "oper",     gid: 54323 }   # OSOPER  — DB operators
+      - { name: "backupdba", gid: 54324 }  # OSBACKUPDBA
+      - { name: "dgdba",    gid: 54325 }   # OSDGDBA — Data Guard
+      - { name: "kmdba",    gid: 54326 }   # OSKMDBA — TDE / key mgmt
+      - { name: "asmadmin", gid: 54327 }   # OSASM   — ASM administrators (grid-only)
+      - { name: "asmdba",   gid: 54328 }   # OSDBA for ASM
+      - { name: "asmoper",  gid: 54329 }   # OSOPER for ASM (grid-only)
     users:
       # Oracle DB owner. Primary group = oinstall (matches what the
       # oracle-database-preinstall-19c RPM creates; preset kept idempotent).
+      # Membership: dba (admin), oper (operator), asmdba (read ASM).
+      # NOT asmadmin / asmoper — those are reserved for the grid user
+      # so privilege boundaries between DB + GI homes stay enforced
+      # (linuxctl#53).
       - { name: "oracle", uid: 54321, gid: "oinstall",
-          groups: ["dba", "asmdba"] }
-      # Grid Infrastructure / ASM / Oracle Restart owner.
+          groups: ["dba", "oper", "backupdba", "dgdba", "kmdba", "asmdba"] }
+      # Grid Infrastructure / ASM / Oracle Restart owner. Owns the GRID
+      # ORACLE_HOME and runs asmca + runInstaller for Phase D.2.
       - { name: "grid",   uid: 54322, gid: "oinstall",
           groups: ["asmadmin", "asmdba", "asmoper", "dba"] }

@@ -62,6 +62,11 @@ type globalFlags struct {
 	dryRun  bool
 	license string
 	verbose bool
+	// reformatFilesystems opts in to destructive mkfs on LVs that already
+	// hold a filesystem of a different type than the manifest requests
+	// (linuxctl#52). Default false: disk.Plan returns an explicit error so
+	// `linuxctl stack apply` can no longer silently destroy data.
+	reformatFilesystems bool
 }
 
 var gf globalFlags
@@ -101,6 +106,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	pf.BoolVar(&gf.dryRun, "dry-run", false, "Alias for plan; never mutate")
 	pf.StringVar(&gf.license, "license", "", "Override ~/.linuxctl/license.jwt")
 	pf.BoolVarP(&gf.verbose, "verbose", "v", false, "Verbose logging")
+	pf.BoolVar(&gf.reformatFilesystems, "reformat-filesystems", false,
+		"Allow disk apply to mkfs over an existing, mismatched filesystem (DESTRUCTIVE)")
 
 	// Groups.
 	cmd.AddCommand(newConfigCmd())

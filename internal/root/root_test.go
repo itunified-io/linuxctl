@@ -583,11 +583,15 @@ func TestDir_UnknownOp(t *testing.T) {
 	}
 }
 
-// ---- stub subsystem commands (service/sysctl/limits/firewall/hosts/
-// network/selinux all stubs) ------------------------------------------------
+// ---- stub subsystem commands (service/sysctl/limits/network/selinux still
+// stubs; firewall + hosts wired in linuxctl#51) ------------------------------
 
 func TestStubSubsystems_AllReturnNotImplemented(t *testing.T) {
-	subsystems := []string{"service", "sysctl", "limits", "firewall", "hosts", "network", "selinux"}
+	// firewall + hosts removed: now wired to runManager via the registered
+	// HostsManager + FirewallManager (linuxctl#51 — Phase C blocker for
+	// /lab-up). Their wiring is exercised in TestHosts_WiredToRunManager
+	// and TestFirewall_WiredToRunManager below.
+	subsystems := []string{"service", "sysctl", "limits", "network", "selinux"}
 	verbs := []string{"plan", "apply", "verify"}
 	for _, s := range subsystems {
 		for _, v := range verbs {
@@ -596,6 +600,51 @@ func TestStubSubsystems_AllReturnNotImplemented(t *testing.T) {
 				t.Errorf("%s %s: want not implemented, got %v", s, v, err)
 			}
 		}
+	}
+}
+
+// TestHosts_WiredToRunManager confirms `linuxctl hosts plan/apply/verify` no
+// longer return "not implemented" — they now invoke the registered HostsManager
+// via runManager. With an empty linux.yaml (no hosts_entries), Plan returns
+// no changes; apply short-circuits cleanly; verify reports OK.
+//
+// linuxctl#51 — Phase C blocker for /lab-up: stack manifests' `hosts_entries:`
+// blocks were silently dropped because the per-subsystem CLI was a stub.
+//
+// We assert the error path (no "not implemented" in the returned error) rather
+// than capture stdout, because runManager prints with fmt.Printf to the real
+// process stdout (matching the convention shared with disk/mount commands).
+func TestHosts_WiredToRunManager(t *testing.T) {
+	linux := writeMinimalLinux(t)
+	for _, verb := range []string{"plan", "apply", "verify"} {
+		_, err := executeCmd(t, "hosts", verb, linux)
+		if err != nil && strings.Contains(err.Error(), "not implemented") {
+			t.Errorf("hosts %s: still returns 'not implemented': %v", verb, err)
+		}
+	}
+}
+
+// TestFirewall_WiredToRunManager mirrors the hosts wiring test for the
+// firewall subsystem (linuxctl#51).
+func TestFirewall_WiredToRunManager(t *testing.T) {
+	linux := writeMinimalLinux(t)
+	for _, verb := range []string{"plan", "apply", "verify"} {
+		_, err := executeCmd(t, "firewall", verb, linux)
+		if err != nil && strings.Contains(err.Error(), "not implemented") {
+			t.Errorf("firewall %s: still returns 'not implemented': %v", verb, err)
+		}
+	}
+}
+
+// TestReformatFilesystemsFlag_Exposed confirms the global flag added for the
+// disk-idempotency fix is reachable from the CLI (linuxctl#52).
+func TestReformatFilesystemsFlag_Exposed(t *testing.T) {
+	out, err := executeCmd(t, "--help")
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !strings.Contains(out, "--reformat-filesystems") {
+		t.Errorf("--help missing --reformat-filesystems flag: %s", out)
 	}
 }
 

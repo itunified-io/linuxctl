@@ -1,4 +1,51 @@
 # Changelog
+## v2026.05.03.1 — 2026-05-03
+
+### fix(lab-up): Phase C blockers — hosts/firewall CLI + disk idempotency + oracle-single grid user (#51 #52 #53)
+
+Three blockers surfaced during /lab-up Phase C live execution against the
+ext3+ext4 lab. All three affected `linuxctl stack apply` and adjacent paths.
+
+**#51 — `linuxctl hosts apply` + `linuxctl firewall apply` were CLI stubs.**
+The HostsManager + FirewallManager are fully implemented in `pkg/managers/`,
+but `internal/root/hosts.go` and `internal/root/firewall.go` returned
+`Error: <subsystem> apply: not implemented`. As a result, stack manifests'
+`hosts_entries:` and `firewall.zones.public.ports:` blocks were silently
+dropped. Both CLI commands now wire to the shared `runManager` helper
+(matching disk/mount/user/package). `internal/root/runtime.go` `bindSession`
++ `desiredFor` extended to cover all 13 managers (previously only handled
+disk + mount).
+
+**#52 — `disk apply` was not idempotent over an existing matching FS.**
+Plan unconditionally emitted `mkfs.<fs> -F /dev/<vg>/<lv>` for every LV in
+the manifest, even when the LV already held a filesystem of the requested
+type. Re-running `apply apply` mid-flight halted the chain. Fix: discovery
+now probes `blkid -o value -s TYPE` on each LV; Plan skips mkfs when the
+existing filesystem matches; errors with an explicit remediation when the
+existing filesystem is a different type; falls through to mkfs when no
+filesystem is present. Adds `--reformat-filesystems` global flag for
+explicit destructive opt-in.
+
+**#53 — `oracle-single` users_groups preset GIDs misaligned with Oracle 19c
+defaults.** The preset already shipped with both `oracle` + `grid` users,
+but ASM group GIDs were 54323/54324/54325 instead of Oracle's documented
+defaults 54327/54328/54329. The preset also omitted Oracle's role-separation
+groups (`oper`, `backupdba`, `dgdba`, `kmdba`) and `oracle` was missing
+membership in `oper`. Updated to match
+https://docs.oracle.com/en/database/oracle/oracle-database/19/ladbi/about-oracle-installation-user-accounts.html
+exactly. `oracle` user is now in `[dba, oper, backupdba, dgdba, kmdba, asmdba]`;
+`grid` user remains in `[asmadmin, asmdba, asmoper, dba]`. Privilege
+boundary between DB + GI homes preserved.
+
+Test additions: 4 new disk manager idempotency tests
+(skip-on-match, error-on-mismatch, mkfs-when-no-FS, --reformat-filesystems
+override); 3 new CLI wiring tests (hosts wired, firewall wired,
+--reformat-filesystems flag exposed); 1 new oracle-single regression gate.
+Existing `TestStubSubsystems_AllReturnNotImplemented` updated — firewall +
+hosts removed from the stub list.
+
+Closes #51, #52, #53.
+
 ## v2026.05.01.1 — 2026-05-01
 
 ### feat(config): accept proxctl-style hosts map in linux.yaml (#48)
