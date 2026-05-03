@@ -1,4 +1,39 @@
 # Changelog
+## v2026.05.03.2 — 2026-05-03
+
+### feat(presets): oracle-single-19c OL9 prereqs (gcc, gcc-c++, make, binutils) (#57)
+
+Live failure during /lab-up Phase D.2 (oracle-grid-install) on `ext3adm1` +
+`ext4adm1` (OL9.7) revealed that `oracle-database-preinstall-19c` does NOT
+pull a working C toolchain on Oracle Linux 9 — runInstaller exited with
+`gcc: command not found` and `g++: command not found` during the link step.
+
+The `oracle-19c` packages preset (consumed by every `oracle-single-19c` /
+`oracle-rac-19c` bundle) now installs `gcc`, `gcc-c++`, `make`, and
+`binutils` alongside the preinstall metapackage. No bundle wiring change
+needed — the existing bundle already references this preset.
+
+**Out of scope for this PR (deferred to a schema enhancement):**
+
+- `ol9_codeready_builder` repo enablement (provides `glibc-static` + dev
+  packages). Needs a new `repos_enable:` capability in the bundle schema.
+- `/usr/lib64/libpthread_nonshared.a` stub file (glibc-on-OL9 split-out
+  workaround for runInstaller's genclntsh; a properly-formed empty `ar`
+  archive with the 8-byte `!<arch>\n` magic header satisfies the link
+  step). Needs a new `files:` capability in the bundle schema.
+- `cvuqdisk` RPM install. The RPM ships INSIDE the Grid Home zip at
+  `$GRID_HOME/cv/rpm/cvuqdisk-*.rpm` and is therefore not available in any
+  yum repo at preset-apply time. The `/oracle-grid-install` skill (infra
+  repo) handles this at Grid-extraction time as Step 0a.
+
+Until the schema additions land, the `/oracle-grid-install` and
+`/oracle-dbhome-install` skills must handle the codeready repo enable + the
+libpthread stub + the cvuqdisk RPM install directly.
+
+Test additions: 1 new regression gate in `pkg/presets/presets_test.go`
+(`TestEmbeddedPresets_Oracle19c_OL9BuildDeps`) asserts the four new
+packages are present and `cvuqdisk` is absent.
+
 ## v2026.05.03.1 — 2026-05-03
 
 ### fix(lab-up): Phase C blockers — hosts/firewall CLI + disk idempotency + oracle-single grid user (#51 #52 #53)

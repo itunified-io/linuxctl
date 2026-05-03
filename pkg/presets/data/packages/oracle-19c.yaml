@@ -4,11 +4,39 @@ metadata:
   name: oracle-19c
   category: packages
   tier: community
-  source: "Oracle Linux oracle-database-preinstall-19c metapackage + kmod-oracleasm"
-  version: "2026-04-22"
+  source: "Oracle Linux oracle-database-preinstall-19c metapackage + kmod-oracleasm + OL9 19c build deps (linuxctl#57)"
+  version: "2026-05-03"
 spec:
   packages:
     install:
+      # Core Oracle 19c metapackage. Pulls glibc-devel, libaio-devel, etc.
+      # On OL9 this does NOT pull a working C toolchain — see notes below.
       - oracle-database-preinstall-19c
+      # ASM kernel module (RPM-only on OL/RHEL family).
       - kmod-oracleasm
+      # CIFS for the /smb/software install-source mount.
       - cifs-utils
+
+      # OL9 Oracle 19c build prereqs (linuxctl#57).
+      # The preinstall-19c metapackage on OL9 omits the C/C++ compiler that
+      # runInstaller's link step needs (e.g. for genclntsh / libsqlplus.so).
+      # Live failure on ext3adm1 + ext4adm1 (OL9.7) — runInstaller exited
+      # with `gcc: command not found` and `g++: command not found`.
+      - gcc
+      - gcc-c++
+      - make
+      - binutils
+
+      # NOTE: cvuqdisk RPM (cluvfy disk-info helper, PRVG-11550 if missing)
+      # ships INSIDE the Grid Home zip at $GRID_HOME/cv/rpm/cvuqdisk-*.rpm.
+      # Installation is therefore a Grid-extraction-time step — see the
+      # /oracle-grid-install skill (infrastructure repo) Step 0a — and is
+      # NOT installed by this preset because the RPM is not in any yum repo.
+      #
+      # NOTE: ol9_codeready_builder repo enablement and the
+      # /usr/lib64/libpthread_nonshared.a stub file (glibc-on-OL9 split-out
+      # workaround for runInstaller's genclntsh) need new bundle capabilities
+      # (`repos_enable:` + `files:`) which do not yet exist in the preset
+      # schema. Tracked as follow-up after linuxctl#57. For now, the
+      # /oracle-grid-install + /oracle-dbhome-install skills handle those two
+      # OL9-specific shims directly.

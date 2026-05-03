@@ -395,6 +395,43 @@ func TestEmbeddedPresets_OracleSingle_HasGridUser(t *testing.T) {
 	}
 }
 
+// TestEmbeddedPresets_Oracle19c_OL9BuildDeps is a regression gate for
+// linuxctl#57. /lab-up Phase D.2 (oracle-grid-install) on OL9 fails with
+// "gcc: command not found" because oracle-database-preinstall-19c does NOT
+// pull a working C toolchain on OL9. The oracle-19c packages preset MUST
+// install gcc + gcc-c++ + make alongside the preinstall metapackage.
+//
+// cvuqdisk is intentionally NOT in this preset — it ships inside the Grid
+// Home zip at $GRID_HOME/cv/rpm/ and is installed by the
+// /oracle-grid-install skill at extraction time.
+func TestEmbeddedPresets_Oracle19c_OL9BuildDeps(t *testing.T) {
+	p, err := ResolveCategory("packages", "oracle-19c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pp, err := PackagesSpec(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"oracle-database-preinstall-19c", // baseline
+		"kmod-oracleasm",                 // baseline
+		"cifs-utils",                     // baseline
+		"gcc",                            // linuxctl#57
+		"gcc-c++",                        // linuxctl#57
+		"make",                           // linuxctl#57
+		"binutils",                       // linuxctl#57
+	} {
+		if !containsStr(pp.Install, want) {
+			t.Errorf("oracle-19c packages preset: missing required package %q (install=%v)", want, pp.Install)
+		}
+	}
+	// cvuqdisk MUST NOT be in this preset — it's a Grid-extraction-time step.
+	if containsStr(pp.Install, "cvuqdisk") {
+		t.Error("oracle-19c packages preset: cvuqdisk MUST NOT be here (it ships inside Grid zip; install via /oracle-grid-install Step 0a)")
+	}
+}
+
 func TestResolve_AmbiguousName(t *testing.T) {
 	// oracle-19c exists in packages, sysctl, limits → ambiguous.
 	if _, err := Resolve("oracle-19c", nil); err == nil {
