@@ -40,6 +40,14 @@ type Linux struct {
 	UsersGroupsPreset string `yaml:"users_groups_preset,omitempty"`
 	PackagesPreset    string `yaml:"packages_preset,omitempty"`
 	BundlePreset      string `yaml:"bundle_preset,omitempty"`
+	// ReposEnable lists dnf repository IDs the repo manager should
+	// ensure are enabled on the host. Bundle-supplied entries are
+	// unioned with explicit entries at config-load time. linuxctl#57.
+	ReposEnable []string `yaml:"repos_enable,omitempty"`
+	// Files declares literal file payloads materialised by the file
+	// manager. Content is base64-encoded so binary stubs (e.g. empty ar
+	// archives) survive YAML round-trips. linuxctl#57.
+	Files        []FileSpec     `yaml:"files,omitempty" validate:"dive"`
 	Firewall     *Firewall      `yaml:"firewall,omitempty"`
 	HostsEntries []HostEntry    `yaml:"hosts_entries,omitempty" validate:"dive"`
 	Services     []ServiceState `yaml:"services,omitempty" validate:"dive"`
@@ -156,6 +164,18 @@ type Packages struct {
 type SysctlEntry struct {
 	Key   string `yaml:"key" validate:"required"`
 	Value string `yaml:"value" validate:"required"`
+}
+
+// FileSpec is a literal file payload materialised by the file manager.
+// The file is identified by its absolute path; content is base64-encoded
+// so binary payloads survive YAML round-trips. linuxctl#57.
+type FileSpec struct {
+	Path       string `yaml:"path" validate:"required,startswith=/"`
+	Mode       string `yaml:"mode,omitempty" validate:"omitempty,len=4"`
+	Owner      string `yaml:"owner,omitempty"`
+	Group      string `yaml:"group,omitempty"`
+	ContentB64 string `yaml:"content_b64" validate:"required"`
+	CreateOnly bool   `yaml:"create_only,omitempty"`
 }
 
 // LimitEntry is a single /etc/security/limits.d entry.

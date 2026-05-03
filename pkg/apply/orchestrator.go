@@ -167,6 +167,10 @@ func (o *Orchestrator) desiredFor(name string) managers.Spec {
 		return o.Linux.Firewall
 	case "hosts":
 		return o.Linux.HostsEntries
+	case "repo":
+		return o.Linux.ReposEnable
+	case "file":
+		return o.Linux.Files
 	case "ssh":
 		// SSH auth pulls keys from UsersGroups; pass full Linux.
 		return o.Linux
@@ -212,6 +216,10 @@ func (o *Orchestrator) bindSession(m managers.Manager) managers.Manager {
 	case *managers.NetworkManager:
 		return v.WithSession(o.Session)
 	case *managers.SSHAuthManager:
+		return v.WithSession(o.Session)
+	case *managers.RepoManager:
+		return v.WithSession(o.Session)
+	case *managers.FileManager:
 		return v.WithSession(o.Session)
 	}
 	return m

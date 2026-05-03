@@ -35,8 +35,7 @@ spec:
       #
       # NOTE: ol9_codeready_builder repo enablement and the
       # /usr/lib64/libpthread_nonshared.a stub file (glibc-on-OL9 split-out
-      # workaround for runInstaller's genclntsh) need new bundle capabilities
-      # (`repos_enable:` + `files:`) which do not yet exist in the preset
-      # schema. Tracked as follow-up after linuxctl#57. For now, the
-      # /oracle-grid-install + /oracle-dbhome-install skills handle those two
-      # OL9-specific shims directly.
+      # workaround for runInstaller's genclntsh) are now declared on the
+      # oracle-single-19c bundle via the `repos_enable:` + `files:`
+      # capabilities introduced in linuxctl#57 (v2). See
+      # pkg/presets/data/bundles/oracle-single-19c.yaml.

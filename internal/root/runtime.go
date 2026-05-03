@@ -171,6 +171,10 @@ func bindSession(m managers.Manager, sess session.Session) managers.Manager {
 		return v.WithSession(sess)
 	case *managers.SSHAuthManager:
 		return v.WithSession(sess)
+	case *managers.RepoManager:
+		return v.WithSession(sess)
+	case *managers.FileManager:
+		return v.WithSession(sess)
 	}
 	return m
 }
@@ -202,6 +206,12 @@ func desiredFor(linux *config.Linux, name string) managers.Spec {
 		// FirewallManager.castFirewall accepts *config.Firewall directly.
 		// Pass the typed pointer (may be nil → no-op plan). linuxctl#51.
 		return linux.Firewall
+	case "repo":
+		// RepoManager consumes a []string of dnf repo IDs. linuxctl#57.
+		return linux.ReposEnable
+	case "file":
+		// FileManager consumes []config.FileSpec literal payloads. linuxctl#57.
+		return linux.Files
 	}
 	return linux
 }

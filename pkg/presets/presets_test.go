@@ -471,6 +471,97 @@ func TestBundleExpand_NotABundle(t *testing.T) {
 	}
 }
 
+// TestBundleInlineExpand_OracleSingle19c verifies that the OL9 Oracle 19c
+// inline-capability shims (linuxctl#57 v2) are surfaced by the registry:
+//   - ol9_codeready_builder must be in repos_enable
+//   - /usr/lib64/libpthread_nonshared.a stub must be in files (CreateOnly)
+func TestBundleInlineExpand_OracleSingle19c(t *testing.T) {
+	repos, files, err := BundleInlineExpand("oracle-single-19c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCRB := false
+	for _, r := range repos {
+		if r == "ol9_codeready_builder" {
+			foundCRB = true
+		}
+	}
+	if !foundCRB {
+		t.Errorf("oracle-single-19c missing ol9_codeready_builder in repos_enable; got %v", repos)
+	}
+	var stub *config.FileSpec
+	for i, f := range files {
+		if f.Path == "/usr/lib64/libpthread_nonshared.a" {
+			stub = &files[i]
+		}
+	}
+	if stub == nil {
+		t.Fatalf("oracle-single-19c missing libpthread_nonshared.a stub; got files=%v", files)
+	}
+	if !stub.CreateOnly {
+		t.Errorf("libpthread stub should be CreateOnly")
+	}
+	if stub.Mode != "0644" || stub.Owner != "root" || stub.Group != "root" {
+		t.Errorf("libpthread stub metadata: mode=%q owner=%q group=%q", stub.Mode, stub.Owner, stub.Group)
+	}
+	if stub.ContentB64 == "" {
+		t.Errorf("libpthread stub has no content_b64")
+	}
+}
+
+func TestBundleInlineExpand_NoInlineYieldsEmpty(t *testing.T) {
+	// oracle-rac-19c does not declare inline capabilities — both lists empty.
+	repos, files, err := BundleInlineExpand("oracle-rac-19c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 0 || len(files) != 0 {
+		t.Errorf("oracle-rac-19c should have no inline caps, got repos=%v files=%v", repos, files)
+	}
+}
+
+func TestBundleParse_RepoAndFiles(t *testing.T) {
+	// Round-trip a Bundle YAML through schema decode to confirm
+	// repos_enable + files survive parsing.
+	src := `
+apiVersion: linuxctl.itunified.io/preset/v1
+kind: Bundle
+metadata:
+  name: test-inline
+  category: bundles
+spec:
+  bundle:
+    packages_preset: oracle-19c
+    repos_enable:
+      - r1
+      - r2
+    files:
+      - path: /a
+        mode: "0600"
+        owner: root
+        group: root
+        content_b64: aGVsbG8=
+        create_only: true
+`
+	var pr Preset
+	if err := yaml.Unmarshal([]byte(src), &pr); err != nil {
+		t.Fatal(err)
+	}
+	b, err := decodeBundle(&pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.PackagesPreset != "oracle-19c" {
+		t.Errorf("PackagesPreset = %q", b.PackagesPreset)
+	}
+	if len(b.ReposEnable) != 2 || b.ReposEnable[0] != "r1" {
+		t.Errorf("ReposEnable = %v", b.ReposEnable)
+	}
+	if len(b.Files) != 1 || b.Files[0].Path != "/a" || !b.Files[0].CreateOnly {
+		t.Errorf("Files = %+v", b.Files)
+	}
+}
+
 func TestSpecDecoders(t *testing.T) {
 	// Directories
 	p, err := ResolveCategory("directories", "oracle-ofa-19c", nil)

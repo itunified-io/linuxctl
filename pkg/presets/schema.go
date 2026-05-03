@@ -47,13 +47,43 @@ type Preset struct {
 	RawSpec map[string]any `yaml:"spec"`
 }
 
-// Bundle is a meta-preset that composes one preset per category.
+// Bundle is a meta-preset that composes one preset per category. In
+// addition to per-category preset references, a bundle may carry inline
+// capabilities that do not fit the named-preset model (linuxctl#57):
+//
+//   - ReposEnable: dnf repository IDs to enable on the host (e.g.
+//     ol9_codeready_builder for OL9 Oracle 19c builds).
+//   - Files: literal file payloads to materialise (e.g. the
+//     /usr/lib64/libpthread_nonshared.a stub used as a glibc-on-OL9
+//     workaround for runInstaller's genclntsh link step).
+//
+// Both lists are merge-targets on config.Linux: explicit entries in the
+// stack manifest are unioned with bundle-supplied entries; conflicts on
+// the natural key (repo ID / file path) are resolved in favour of the
+// explicit (manifest) entry.
 type Bundle struct {
-	DirectoriesPreset string `yaml:"directories_preset,omitempty"`
-	UsersGroupsPreset string `yaml:"users_groups_preset,omitempty"`
-	PackagesPreset    string `yaml:"packages_preset,omitempty"`
-	SysctlPreset      string `yaml:"sysctl_preset,omitempty"`
-	LimitsPreset      string `yaml:"limits_preset,omitempty"`
+	DirectoriesPreset string     `yaml:"directories_preset,omitempty"`
+	UsersGroupsPreset string     `yaml:"users_groups_preset,omitempty"`
+	PackagesPreset    string     `yaml:"packages_preset,omitempty"`
+	SysctlPreset      string     `yaml:"sysctl_preset,omitempty"`
+	LimitsPreset      string     `yaml:"limits_preset,omitempty"`
+	ReposEnable       []string   `yaml:"repos_enable,omitempty"`
+	Files             []FileSpec `yaml:"files,omitempty"`
+}
+
+// FileSpec describes a single file payload owned by the file manager.
+// Content is base64-encoded so binary payloads (empty ar archives, ELF
+// stubs) survive YAML round-trips intact.
+type FileSpec struct {
+	Path       string `yaml:"path"`
+	Mode       string `yaml:"mode,omitempty"`
+	Owner      string `yaml:"owner,omitempty"`
+	Group      string `yaml:"group,omitempty"`
+	ContentB64 string `yaml:"content_b64"`
+	// CreateOnly skips overwrite when the target already exists. Used for
+	// stub files that must not clobber a real implementation if one was
+	// installed by a later RPM.
+	CreateOnly bool `yaml:"create_only,omitempty"`
 }
 
 // TierFunc is a callback supplied by the caller (usually wired to the license
